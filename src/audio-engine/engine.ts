@@ -7,7 +7,7 @@ export type ADSR = {
   release: number
 }
 
-export type MacroModel = 'va' | 'fold' | 'pluck' | 'supersaw' | 'pwm' | 'fm2op'
+export type MacroModel = 'va' | 'fold' | 'pluck' | 'supersaw' | 'pwm' | 'fm2op' | 'wavetable' | 'harmonic' | 'chord'
 
 export type Patch = {
   osc1: { wave: WaveType; detune: number; finePct?: number }
@@ -34,6 +34,34 @@ export type Patch = {
   }
   lfo1?: { enabled: boolean; wave: Exclude<WaveType, 'noise'>; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
   lfo2?: { enabled: boolean; wave: Exclude<WaveType, 'noise'>; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
+  arp?: {
+    enabled: boolean
+    // Free-rate mode
+    rateHz: number
+    // Tempo-sync
+    bpmSync: boolean
+    bpm: number
+    division: '1/4' | '1/8' | '1/8T' | '1/16' | '1/16T'
+    // Playback
+    gate: number
+    mode: 'up' | 'down' | 'updown' | 'random' | 'asplayed'
+    octaves: number
+    latch: boolean
+    swingPct?: number // 0..1, 0 = straight, 1 = extreme swing
+    repeats?: number // 1..4
+    patternLen?: number // 0 = auto (pool length), else limit steps
+  }
+  sequencer?: {
+    enabled: boolean
+    playing: boolean
+    bpm: number
+    division: '1/4' | '1/8' | '1/8T' | '1/16' | '1/16T'
+    swingPct?: number
+    gate: number
+    rootMidi: number
+    length: number
+    steps: Array<{ on: boolean; offset: number; velocity: number }>
+  }
 }
 
 export const defaultPatch: Patch = {
@@ -54,6 +82,18 @@ export const defaultPatch: Patch = {
   },
   lfo1: { enabled: false, wave: 'sine', rateHz: 5, amount: 0.2, dest: 'pitch' },
   lfo2: { enabled: false, wave: 'triangle', rateHz: 0.5, amount: 0.4, dest: 'filter' },
+  arp: { enabled: false, rateHz: 8, bpmSync: false, bpm: 120, division: '1/8', gate: 0.6, mode: 'up', octaves: 1, latch: false, swingPct: 0, repeats: 1, patternLen: 0 },
+  sequencer: {
+    enabled: false,
+    playing: false,
+    bpm: 120,
+    division: '1/16',
+    swingPct: 0,
+    gate: 0.6,
+    rootMidi: 60,
+    length: 16,
+    steps: Array.from({ length: 16 }, () => ({ on: false, offset: 0, velocity: 1 })),
+  },
 }
 
 function createNoiseBuffer(ctx: AudioContext) {
@@ -78,6 +118,23 @@ export class SynthEngine {
   private currentFxTap: AudioNode | null = null
   private lfos: Array<{ osc: OscillatorNode; gain: GainNode; dest: 'pitch' | 'filter' | 'amp' | 'none' }>
   patch: Patch
+
+  // Arpeggiator state
+  private arpHeld = new Set<number>()
+  private arpIndex = 0
+  private arpTimer: number | null = null
+  private arpLastNote: number | null = null
+  private arpBypass = false
+  private arpPhase = 0 // 0=onbeat, 1=offbeat for swing
+  private arpRepeatCounter = 0
+  private arpCurrentStepMs = 0
+
+  // Sequencer state
+  private seqTimer: number | null = null
+  private seqPhase = 0
+  private seqCurrentStepMs = 0
+  private seqStepIndex = 0
+  private seqLastNote: number | null = null
 
   constructor(ctx?: AudioContext) {
     this.ctx = ctx ?? new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -150,6 +207,8 @@ export class SynthEngine {
       effects: { ...(this.patch.effects ?? defaultPatch.effects!), ...(p.effects ?? {}) },
       lfo1: { ...(this.patch.lfo1 ?? defaultPatch.lfo1!), ...(p.lfo1 ?? {}) },
       lfo2: { ...(this.patch.lfo2 ?? defaultPatch.lfo2!), ...(p.lfo2 ?? {}) },
+      arp: { ...(this.patch.arp ?? defaultPatch.arp!), ...(p.arp ?? {}) },
+      sequencer: { ...(this.patch.sequencer ?? defaultPatch.sequencer!), ...(p.sequencer ?? {}) },
     }
 
     this.master.gain.value = this.patch.master.gain
@@ -192,6 +251,11 @@ export class SynthEngine {
         }
       }
     }
+
+    // Reconfigure arpeggiator scheduling based on patch changes
+    this.updateArpScheduler()
+    // Reconfigure sequencer
+    this.updateSeqScheduler()
   }
 
   private buildFxChain() {
@@ -327,6 +391,120 @@ export class SynthEngine {
       output: out as AudioNode,
       stop: (t: number) => voices.forEach(({ osc }) => osc.stop(t)),
       pitched: voices.map(v => v.osc),
+    }
+  }
+
+  private createMacroWavetable(freq: number, p: NonNullable<Patch['macro']>) {
+    // Blend between basic waves: sine -> triangle -> saw -> square
+    const shapes: OscillatorType[] = ['sine', 'triangle', 'sawtooth', 'square']
+    const seg = Math.min(3, Math.max(0, Math.floor(p.morph * 3.00001)))
+    const t = Math.min(1, Math.max(0, p.morph * 3 - seg))
+
+    const make = (type: OscillatorType, gain: number) => {
+      const osc = this.ctx.createOscillator(); osc.type = type; osc.frequency.value = freq
+      const g = this.ctx.createGain(); g.gain.value = gain
+      osc.connect(g)
+      return { osc, g }
+    }
+    const a = make(shapes[seg], seg === 3 ? 1 : 1 - t)
+    const b = seg < 3 ? make(shapes[seg + 1], t) : null
+
+    // Brightness via lowpass; timbre adjusts Q a bit
+    const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass'
+    tone.frequency.value = 800 + p.harmonics * 15000
+    tone.Q.value = 0.1 + p.timbre * 0.6
+
+    const out = this.ctx.createGain(); out.gain.value = p.level
+    a.g.connect(tone); if (b) b.g.connect(tone); tone.connect(out)
+
+    a.osc.start(); if (b) b.osc.start()
+
+    const pitched: OscillatorNode[] = [a.osc]; if (b) pitched.push(b.osc)
+    return {
+      output: out as AudioNode,
+      stop: (tStop: number) => { a.osc.stop(tStop); if (b) b.osc.stop(tStop) },
+      pitched,
+    }
+  }
+
+  private createMacroHarmonic(freq: number, p: NonNullable<Patch['macro']>) {
+    // Additive stack with controllable partial count and tilt
+    const maxPartials = 16
+    const minPartials = 2
+    const count = Math.round(minPartials + p.harmonics * (maxPartials - minPartials))
+    const tilt = 0.5 + (1 - p.timbre) * 2.0 // higher -> darker
+    const oddEvenBias = (p.morph - 0.5) * 2 // -1..1 (odd..even)
+
+    const sum = this.ctx.createGain()
+    const pitched: OscillatorNode[] = []
+    for (let n = 1; n <= count; n++) {
+      const osc = this.ctx.createOscillator(); osc.type = 'sine'
+      osc.frequency.value = freq * n
+      let amp = 1 / Math.pow(n, tilt)
+      const isEven = (n % 2) === 0
+      const bias = isEven ? Math.max(0.1, (oddEvenBias + 1) / 2) : Math.max(0.1, (1 - oddEvenBias) / 2)
+      amp *= bias
+      const g = this.ctx.createGain(); g.gain.value = amp
+      osc.connect(g).connect(sum)
+      osc.start()
+      pitched.push(osc)
+    }
+    const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass'
+    tone.frequency.value = 1000 + p.timbre * 15000
+    tone.Q.value = 0.2
+    const out = this.ctx.createGain(); out.gain.value = p.level
+    sum.connect(tone).connect(out)
+    return {
+      output: out as AudioNode,
+      stop: (tStop: number) => { for (const o of pitched) o.stop(tStop) },
+      pitched,
+    }
+  }
+
+  private createMacroChord(freq: number, p: NonNullable<Patch['macro']>) {
+    // Stack a chord; choose set by harmonics, inversion/spread by morph
+    const CHORDS: number[][] = [
+      [0, 4, 7],            // Major
+      [0, 3, 7],            // Minor
+      [0, 5, 7],            // Sus4
+      [0, 2, 7],            // Sus2
+      [0, 4, 7, 10],        // Dom7
+      [0, 3, 7, 10],        // Min7
+      [0, 4, 7, 11],        // Maj7
+      [0, 3, 6, 9],         // Dim7
+      [0, 4, 8],            // Aug
+      [-12, 0, 7, 12],      // Spread octave
+    ]
+    const idx = Math.max(0, Math.min(CHORDS.length - 1, Math.floor(p.harmonics * CHORDS.length)))
+    const chord = CHORDS[idx]
+    const spread = (p.morph - 0.5) * 2 // -1..1 -> detune/pan
+
+    const mix = this.ctx.createGain()
+    const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass'
+    tone.frequency.value = 900 + p.timbre * 15000
+    tone.Q.value = 0.3
+    const out = this.ctx.createGain(); out.gain.value = p.level
+
+    const pitched: OscillatorNode[] = []
+    const panPattern = [-1, -0.3, 0.3, 1]
+    chord.forEach((semi, i) => {
+      const osc = this.ctx.createOscillator(); osc.type = 'sawtooth'
+      const f = 440 * Math.pow(2, (Math.log2(freq / 440) + semi / 12))
+      osc.frequency.value = f
+      const detuneCents = panPattern[i % panPattern.length] * spread * 15
+      osc.detune.value = detuneCents
+      const g = this.ctx.createGain(); g.gain.value = 1 / chord.length
+      const pan = this.ctx.createStereoPanner(); pan.pan.value = panPattern[i % panPattern.length] * spread
+      osc.connect(g).connect(pan).connect(mix)
+      osc.start()
+      pitched.push(osc)
+    })
+
+    mix.connect(tone).connect(out)
+    return {
+      output: out as AudioNode,
+      stop: (tStop: number) => { for (const o of pitched) o.stop(tStop) },
+      pitched,
     }
   }
 
@@ -537,6 +715,15 @@ export class SynthEngine {
         case 'fm2op':
           macro = this.createMacroFM2Op(freq, p)
           break
+        case 'wavetable':
+          macro = this.createMacroWavetable(freq, p)
+          break
+        case 'harmonic':
+          macro = this.createMacroHarmonic(freq, p)
+          break
+        case 'chord':
+          macro = this.createMacroChord(freq, p)
+          break
         case 'va':
         default:
           macro = this.createMacroVA(freq, p)
@@ -737,13 +924,294 @@ export class SynthEngine {
     return { stop }
   }
 
+  
+
+  allNotesOff() {
+    const t = this.ctx.currentTime
+    for (const v of this.activeVoices.values()) v.stop(t)
+    this.activeVoices.clear()
+  }
+
+  // --- Arpeggiator helpers ---
+  private buildArpPool(): number[] {
+    if (this.arpHeld.size === 0) return []
+    const mode = this.patch.arp?.mode ?? 'up'
+    const base = mode === 'asplayed' ? Array.from(this.arpHeld.values()) : Array.from(this.arpHeld.values()).sort((a, b) => a - b)
+    const oct = Math.max(1, Math.min(4, this.patch.arp?.octaves ?? 1))
+    const pool: number[] = []
+    for (let o = 0; o < oct; o++) {
+      for (const n of base) pool.push(n + o * 12)
+    }
+    if (mode === 'down') return pool.slice().sort((a, b) => b - a)
+    if (mode === 'random') return pool.slice().sort(() => Math.random() - 0.5)
+    if (mode === 'updown') {
+      const up = pool.slice().sort((a, b) => a - b)
+      const down = up.slice().reverse().slice(1, -1)
+      return up.concat(down)
+    }
+    return pool
+  }
+
+  private updateArpScheduler() {
+    const enabled = !!this.patch.arp?.enabled
+    if (enabled && this.arpHeld.size > 0) {
+      if (this.arpTimer != null) { clearTimeout(this.arpTimer); this.arpTimer = null }
+      this.arpPhase = 0
+      this.arpRepeatCounter = 0
+      this.scheduleNextArpTick()
+    } else {
+      if (this.arpTimer != null) { clearTimeout(this.arpTimer); this.arpTimer = null }
+      // stop any lingering gated note
+      if (this.arpLastNote != null) {
+        const toOff = this.arpLastNote
+        this.arpBypass = true
+        try { this.noteOff(toOff) } finally { this.arpBypass = false }
+        this.arpLastNote = null
+      }
+      this.arpIndex = 0
+      this.arpRepeatCounter = 0
+    }
+  }
+
+  private scheduleNextArpTick() {
+    const base = this.getArpStepMs()
+    // Swing only in BPM sync; scale by division (less swing for 1/16, none for triplets/quarters)
+    let swing = 0
+    if (this.patch.arp?.bpmSync) {
+      const div = this.patch.arp?.division
+      const raw = Math.max(0, Math.min(1, this.patch.arp?.swingPct ?? 0))
+      if (div === '1/8') swing = raw
+      else if (div === '1/16') swing = raw * 0.5
+      else swing = 0 // 1/4 and triplets
+    }
+    // on-beat longer, off-beat shorter (classic swing)
+    const factor = this.arpPhase === 0 ? 1 + swing * 0.5 : 1 - swing * 0.5
+    const delay = base * factor
+    this.arpCurrentStepMs = delay
+    this.arpTimer = (setTimeout(() => {
+      // If arp disabled mid-wait, abort
+      if (!this.patch.arp?.enabled || this.arpHeld.size === 0) { this.updateArpScheduler(); return }
+      this.arpTick()
+      this.arpPhase = this.arpPhase ? 0 : 1
+      this.scheduleNextArpTick()
+    }, delay) as unknown) as number
+  }
+
+  private getArpStepMs() {
+    const arp = this.patch.arp!
+    if (arp?.bpmSync) {
+      const bpm = Math.max(20, Math.min(300, arp.bpm || 120))
+      const quarterMs = 60000 / bpm
+      const div = arp.division || '1/8'
+      const fraction = div === '1/4' ? 1
+        : div === '1/8' ? 0.5
+        : div === '1/8T' ? 1 / 3
+        : div === '1/16' ? 0.25
+        : /* '1/16T' */ 1 / 6
+      return quarterMs * fraction
+    } else {
+      const rateHz = Math.max(0.1, arp?.rateHz ?? 8)
+      return 1000 / rateHz
+    }
+  }
+
+  private arpTick() {
+    let pool = this.buildArpPool()
+    if (pool.length === 0) {
+      // nothing to play
+      if (this.arpLastNote != null) {
+        const toOff = this.arpLastNote
+        this.arpBypass = true
+        try { this.noteOff(toOff) } finally { this.arpBypass = false }
+        this.arpLastNote = null
+      }
+      return
+    }
+    const maxLen = Math.max(0, this.patch.arp?.patternLen ?? 0)
+    if (maxLen > 0 && pool.length > maxLen) pool = pool.slice(0, maxLen)
+    // select next note
+    if (this.arpIndex >= pool.length) this.arpIndex = 0
+    const midi = pool[this.arpIndex++]
+    const repeats = Math.max(1, Math.min(8, this.patch.arp?.repeats ?? 1))
+    if (this.arpRepeatCounter < repeats - 1) {
+      // stay on same index for more repeats
+      this.arpIndex = (this.arpIndex - 1 + pool.length) % pool.length
+      this.arpRepeatCounter++
+    } else {
+      this.arpRepeatCounter = 0
+    }
+
+    // Stop previous if gate < 1 (avoid overhang). We'll still allow envelope release.
+    if (this.arpLastNote != null && (this.patch.arp?.gate ?? 0.6) >= 1) {
+      // keep sustained until next explicit stop
+    }
+
+    // Play now
+    this.arpBypass = true
+    try {
+      this.noteOn(midi)
+    } finally {
+      this.arpBypass = false
+    }
+    this.arpLastNote = midi
+
+    // Schedule note off by gate fraction
+    const stepMs = this.arpCurrentStepMs || this.getArpStepMs()
+    const gate = Math.max(0.05, Math.min(1, this.patch.arp?.gate ?? 0.6))
+    const offMs = stepMs * gate
+    const toOff = midi
+    setTimeout(() => {
+      this.arpBypass = true
+      try { this.noteOff(toOff) } finally { this.arpBypass = false }
+    }, offMs)
+  }
+
+  getArpStatus() {
+    const enabled = !!this.patch.arp?.enabled
+    let len = 0
+    let idx = 0
+    if (enabled) {
+      const poolLen = this.buildArpPool().length
+      const maxLen = Math.max(0, this.patch.arp?.patternLen ?? 0)
+      len = maxLen > 0 ? Math.min(maxLen, poolLen) : poolLen
+      if (len <= 0) len = 0
+      // Estimate current index as last played step
+      if (len > 0) {
+        const est = (this.arpIndex - 1 + len) % len
+        idx = est < 0 ? 0 : est
+      }
+    }
+    return { enabled, stepIndex: idx, length: len }
+  }
+
+  // --- Sequencer helpers ---
+  private getSeqStepMs() {
+    const seq = this.patch.sequencer!
+    const bpm = Math.max(20, Math.min(300, seq.bpm || 120))
+    const quarterMs = 60000 / bpm
+    const div = seq.division
+    const fraction = div === '1/4' ? 1
+      : div === '1/8' ? 0.5
+      : div === '1/8T' ? 1 / 3
+      : div === '1/16' ? 0.25
+      : /* '1/16T' */ 1 / 6
+    return quarterMs * fraction
+  }
+
+  private updateSeqScheduler() {
+    const seq = this.patch.sequencer!
+    const shouldRun = !!seq.enabled && !!seq.playing
+    if (shouldRun) {
+      if (this.seqTimer != null) { clearTimeout(this.seqTimer); this.seqTimer = null }
+      this.seqPhase = 0
+      this.seqStepIndex = this.seqStepIndex % Math.max(1, seq.length)
+      this.scheduleNextSeqTick()
+    } else {
+      if (this.seqTimer != null) { clearTimeout(this.seqTimer); this.seqTimer = null }
+      if (this.seqLastNote != null) {
+        const toOff = this.seqLastNote
+        this.arpBypass = true
+        try { this.noteOff(toOff) } finally { this.arpBypass = false }
+        this.seqLastNote = null
+      }
+    }
+  }
+
+  private scheduleNextSeqTick() {
+    const base = this.getSeqStepMs()
+    // Swing for sequencer; apply only to straight divisions (not triplets)
+    const div = this.patch.sequencer?.division
+    let swing = Math.max(0, Math.min(1, this.patch.sequencer?.swingPct ?? 0))
+    if (div === '1/16') swing *= 0.5
+    if (div === '1/8') swing = swing
+    if (div === '1/4' || div?.endsWith('T')) swing = 0
+    const factor = this.seqPhase === 0 ? 1 + swing * 0.5 : 1 - swing * 0.5
+    const delay = base * factor
+    this.seqCurrentStepMs = delay
+    this.seqTimer = (setTimeout(() => {
+      if (!this.patch.sequencer?.enabled || !this.patch.sequencer?.playing) { this.updateSeqScheduler(); return }
+      this.seqTick()
+      this.seqPhase = this.seqPhase ? 0 : 1
+      this.scheduleNextSeqTick()
+    }, delay) as unknown) as number
+  }
+
+  private seqTick() {
+    const seq = this.patch.sequencer!
+    const len = Math.max(1, Math.min(seq.steps.length, seq.length))
+    const i = this.seqStepIndex % len
+    const step = seq.steps[i] || { on: false, offset: 0, velocity: 1 }
+    this.seqStepIndex = (this.seqStepIndex + 1) % len
+
+    // Stop previous sustained note if gate >= 1
+    if (this.seqLastNote != null && (seq.gate ?? 0.6) >= 1) {
+      const toOffPrev = this.seqLastNote
+      this.arpBypass = true
+      try { this.noteOff(toOffPrev) } finally { this.arpBypass = false }
+      this.seqLastNote = null
+    }
+
+    if (step.on) {
+      const midi = Math.round((seq.rootMidi || 60) + (step.offset || 0))
+      // Trigger note bypassing ARP
+      this.arpBypass = true
+      try { this.noteOn(midi) } finally { this.arpBypass = false }
+      this.seqLastNote = midi
+
+      const gate = Math.max(0.05, Math.min(1, seq.gate ?? 0.6))
+      const offMs = (this.seqCurrentStepMs || this.getSeqStepMs()) * gate
+      setTimeout(() => {
+        this.arpBypass = true
+        try { this.noteOff(midi) } finally { this.arpBypass = false }
+      }, offMs)
+    }
+  }
+
+  getSequencerStatus() {
+    const seq = this.patch.sequencer!
+    const enabled = !!seq.enabled && !!seq.playing
+    const length = Math.max(0, Math.min(seq.steps.length, seq.length))
+    const stepIndex = enabled && length > 0 ? (this.seqStepIndex + length - 1) % length : 0
+    return { enabled, stepIndex, length }
+  }
+
+  previewNote(midi: number, ms = 150) {
+    this.arpBypass = true
+    try { this.noteOn(midi) } finally { this.arpBypass = false }
+    setTimeout(() => {
+      this.arpBypass = true
+      try { this.noteOff(midi) } finally { this.arpBypass = false }
+    }, Math.max(20, ms))
+  }
+
+  // Override noteOn/noteOff to integrate ARP
   noteOn(midi: number) {
+    if (this.patch.arp?.enabled && !this.arpBypass) {
+      this.arpHeld.add(midi)
+      this.updateArpScheduler()
+      return
+    }
     const freq = 440 * Math.pow(2, (midi - 69) / 12)
     const voice = this.makeVoice(freq)
     this.activeVoices.set(midi, voice)
   }
 
   noteOff(midi: number) {
+    if (this.patch.arp?.enabled && !this.arpBypass) {
+      // In latch mode, ignore noteOff for held pool
+      if (!this.patch.arp?.latch) {
+        this.arpHeld.delete(midi)
+        if (this.arpHeld.size === 0) this.updateArpScheduler()
+      }
+      // If the released key is the currently sounding one, stop it now
+      if (this.arpLastNote === midi) {
+        const v = this.activeVoices.get(midi)
+        if (v) v.stop(this.ctx.currentTime)
+        this.activeVoices.delete(midi)
+        if (this.arpLastNote === midi) this.arpLastNote = null
+      }
+      return
+    }
     const v = this.activeVoices.get(midi)
     if (v) {
       v.stop(this.ctx.currentTime)
@@ -751,9 +1219,16 @@ export class SynthEngine {
     }
   }
 
-  allNotesOff() {
-    const t = this.ctx.currentTime
-    for (const v of this.activeVoices.values()) v.stop(t)
-    this.activeVoices.clear()
+  arpClear() {
+    // Clear latched held notes and stop scheduler
+    this.arpHeld.clear()
+    this.arpIndex = 0
+    if (this.arpTimer != null) { clearInterval(this.arpTimer); this.arpTimer = null }
+    if (this.arpLastNote != null) {
+      const toOff = this.arpLastNote
+      this.arpBypass = true
+      try { this.noteOff(toOff) } finally { this.arpBypass = false }
+      this.arpLastNote = null
+    }
   }
 }

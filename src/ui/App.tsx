@@ -10,6 +10,8 @@ import { PatchPanel } from './PatchPanel'
 import { Oscilloscope } from './Oscilloscope'
 import { EffectsPanel } from './EffectsPanel'
 import { LFOPanel } from './LFOPanel'
+import { ArpPanel } from './ArpPanel'
+import { SequencerPanel } from './SequencerPanel'
 
 export function App() {
   const engine = useStore((s: State) => s.engine)
@@ -78,6 +80,14 @@ export function App() {
           <section className="panel" style={{ gridColumn: 'span 2' }}>
             <h3>LFOs</h3>
             <LFOPanel />
+          </section>
+          <section className="panel" style={{ gridColumn: 'span 2' }}>
+            <h3>Arpeggiator</h3>
+            <ArpPanel />
+          </section>
+          <section className="panel" style={{ gridColumn: 'span 2' }}>
+            <h3>Sequencer</h3>
+            <SequencerPanel />
           </section>
           <section className="panel">
             <h3>Filter</h3>

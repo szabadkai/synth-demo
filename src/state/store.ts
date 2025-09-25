@@ -33,6 +33,8 @@ export const useStore = create<State>()(
           effects: { ...((get().patch as any).effects || defaultPatch.effects), ...(p as any).effects },
           lfo1: { ...((get().patch as any).lfo1 || defaultPatch.lfo1), ...(p as any).lfo1 },
           lfo2: { ...((get().patch as any).lfo2 || defaultPatch.lfo2), ...(p as any).lfo2 },
+          arp: { ...((get().patch as any).arp || defaultPatch.arp), ...(p as any).arp },
+          sequencer: { ...((get().patch as any).sequencer || defaultPatch.sequencer), ...(p as any).sequencer },
           mix: (p as any).mix != null ? (p as any).mix : get().patch.mix,
         }
         get().engine?.applyPatch(next)
@@ -55,6 +57,8 @@ export const useStore = create<State>()(
           effects: { ...((get().patch as any).effects || defaultPatch.effects), ...(obj as any).effects },
           lfo1: { ...((get().patch as any).lfo1 || defaultPatch.lfo1), ...(obj as any).lfo1 },
           lfo2: { ...((get().patch as any).lfo2 || defaultPatch.lfo2), ...(obj as any).lfo2 },
+          arp: { ...((get().patch as any).arp || defaultPatch.arp), ...(obj as any).arp },
+          sequencer: { ...((get().patch as any).sequencer || defaultPatch.sequencer), ...(obj as any).sequencer },
           mix: (obj as any).mix != null ? (obj as any).mix : get().patch.mix,
         }
         get().engine?.applyPatch(merged)
@@ -65,7 +69,7 @@ export const useStore = create<State>()(
     {
       name: 'websynth-patch',
       partialize: (state) => ({ patch: state.patch }),
-      version: 5,
+      version: 7,
       migrate: (persistedState: any, version: number) => {
         // Ensure new fields (osc2, mix) exist by merging with defaults
         const p = persistedState?.patch
@@ -85,6 +89,8 @@ export const useStore = create<State>()(
           effects: { ...defaultPatch.effects!, ...(p.effects || {}) },
           lfo1: { ...defaultPatch.lfo1!, ...(p.lfo1 || {}) },
           lfo2: { ...defaultPatch.lfo2!, ...(p.lfo2 || {}) },
+          arp: { ...defaultPatch.arp!, ...(p.arp || {}) },
+          sequencer: { ...defaultPatch.sequencer!, ...(p.sequencer || {}) },
           mix: typeof p.mix === 'number' ? p.mix : defaultPatch.mix,
         }
         return { ...persistedState, patch: migratedPatch }

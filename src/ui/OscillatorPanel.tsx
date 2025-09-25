@@ -24,7 +24,7 @@ export function OscillatorPanel() {
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngineMode(e.target.value as any)}
           >
             <option value="classic">Classic (Osc 1 + Osc 2)</option>
-            <option value="macro">Macro (Plaits-like)</option>
+            <option value="macro">Macro (Plaits/MF-like)</option>
           </select>
         </label>
         <label>
@@ -39,6 +39,9 @@ export function OscillatorPanel() {
             <option value="supersaw">SuperSaw</option>
             <option value="pwm">PWM</option>
             <option value="fm2op">FM 2-Op</option>
+            <option value="wavetable">Wavetable (blend)</option>
+            <option value="harmonic">Harmonic (additive)</option>
+            <option value="chord">Chord (stack)</option>
           </select>
         </label>
         <Slider
@@ -86,7 +89,7 @@ export function OscillatorPanel() {
           onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngineMode(e.target.value as any)}
         >
           <option value="classic">Classic (Osc 1 + Osc 2)</option>
-          <option value="macro">Macro (Plaits-like)</option>
+          <option value="macro">Macro (Plaits/MF-like)</option>
         </select>
       </label>
       {/* Column headers */}

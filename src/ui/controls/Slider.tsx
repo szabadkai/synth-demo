@@ -8,9 +8,10 @@ type Props = {
   label?: string
   onChange: (v: number) => void
   disabled?: boolean
+  format?: (v: number) => string
 }
 
-export function Slider({ value, min, max, step = 0.01, label, onChange, disabled = false }: Props) {
+export function Slider({ value, min, max, step = 0.01, label, onChange, disabled = false, format }: Props) {
   return (
     <label style={{ display: 'grid', gap: 6, opacity: disabled ? 0.6 : 1 }}>
       {label && <span className="label">{label}</span>}
@@ -23,7 +24,7 @@ export function Slider({ value, min, max, step = 0.01, label, onChange, disabled
         onChange={(e) => onChange(Number(e.target.value))}
         disabled={disabled}
       />
-      <span className="value">{value.toFixed(2)}</span>
+      <span className="value">{format ? format(value) : value.toFixed(2)}</span>
     </label>
   )
 }
