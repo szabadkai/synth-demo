@@ -139,6 +139,24 @@ select, input[type="number"], input[type="text"] {
   z-index: 2;
 }
 
+/* Key label overlays */
+.key .key-label {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  line-height: 1;
+  color: #111827; /* dark text for white keys */
+  opacity: 0.9;
+  pointer-events: none;
+  user-select: none;
+}
+.key.black .key-label {
+  color: #e5e7eb; /* light text for black keys */
+  opacity: 0.85;
+}
+
 .keys-row { position: relative; display: flex; }
 
 .kbd-help {

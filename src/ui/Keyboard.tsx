@@ -25,6 +25,16 @@ function blackMidi(whiteIndex: number, baseMidi = 60) {
   return baseMidi + octave * 12 + offset
 }
 
+// Computer keyboard mapping: key -> semitone offset relative to baseMidi
+const REL_MAP: Record<string, number> = {
+  a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11, k: 12,
+  o: 13, l: 14, p: 15, ';': 16, "'": 17,
+}
+// Reverse mapping: offset -> display label
+const OFFSET_TO_LABEL: Record<number, string> = Object.fromEntries(
+  Object.entries(REL_MAP).map(([k, v]) => [v, (k.length === 1 ? k.toUpperCase() : k)])
+)
+
 export function Keyboard() {
   const engine = useStore((s: State) => s.engine)
   const [active, setActive] = useState<Set<number>>(() => new Set())
@@ -45,10 +55,6 @@ export function Keyboard() {
 
   useEffect(() => {
     // map to relative semitone offsets from baseMidi
-    const rel: Record<string, number> = {
-      a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11, k: 12,
-      o: 13, l: 14, p: 15, ';': 16, "'": 17,
-    }
     const down = new Set<string>()
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return
@@ -61,7 +67,7 @@ export function Keyboard() {
         setBaseMidi((m: number) => Math.min(96, m + 12))
         return
       }
-      const off = rel[e.key]
+      const off = REL_MAP[e.key]
       const midi = off != null ? baseMidi + off : undefined
       if (midi != null && !down.has(e.key)) {
         down.add(e.key)
@@ -69,7 +75,7 @@ export function Keyboard() {
       }
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      const off = rel[e.key]
+      const off = REL_MAP[e.key]
       const midi = off != null ? baseMidi + off : undefined
       if (midi != null) {
         down.delete(e.key)
@@ -112,7 +118,9 @@ export function Keyboard() {
               onMouseDown={() => noteOn(midi)}
               onMouseUp={() => noteOff(midi)}
               onMouseLeave={() => noteOff(midi)}
-            />
+            >
+              <span className="key-label">{OFFSET_TO_LABEL[midi - baseMidi] ?? ''}</span>
+            </div>
           ))}
           {/* Black keys overlay, positioned over whites */}
           {Array.from({ length: whiteCount }).map((_: unknown, i: number) => {
@@ -128,7 +136,9 @@ export function Keyboard() {
                 onMouseDown={() => noteOn(midi)}
                 onMouseUp={() => noteOff(midi)}
                 onMouseLeave={() => noteOff(midi)}
-              />
+              >
+                <span className="key-label">{OFFSET_TO_LABEL[midi - baseMidi] ?? ''}</span>
+              </div>
             )
           })}
         </div>
