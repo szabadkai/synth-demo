@@ -1,0 +1,45 @@
+# Node & package managers
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Build outputs
+/dist/
+/build/
+/.parcel-cache/
+.next/
+out/
+coverage/
+*.log
+
+# Vite & TypeScript
+vite.config.d.ts
+vite.config.js
+*.tsbuildinfo
+
+# Environment & local config
+.env
+.env.*.local
+*.local
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Tests
+.junit/
+.tap/
+
+# OS and editor
+Thumbs.db
+*.iml
+
+# Optional: lockfiles you don't want committed (uncomment if desired)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
