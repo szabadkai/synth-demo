@@ -1,0 +1,90 @@
+import React, { useCallback, useMemo, useRef, useState } from 'react'
+
+type Props = {
+  value: number
+  min: number
+  max: number
+  step?: number
+  size?: number
+  label?: string
+  onChange: (v: number) => void
+}
+
+export function Knob({ value, min, max, step = 0.01, size = 56, label, onChange }: Props) {
+  const [active, setActive] = useState(false)
+  const start = useRef<{ y: number; v: number } | null>(null)
+  const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
+  const range = max - min
+  const norm = range === 0 ? 0 : (value - min) / range
+  const angle = useMemo(() => -135 + norm * 270, [norm])
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    ;(e.target as Element).setPointerCapture(e.pointerId)
+    start.current = { y: e.clientY, v: value }
+    setActive(true)
+  }
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!start.current) return
+    const dy = start.current.y - e.clientY
+    const delta = (dy / 150) * range
+    const next = clamp(start.current.v + delta)
+    onChange(roundTo(next, step))
+  }
+  const onPointerUp = (e: React.PointerEvent) => {
+    ;(e.target as Element).releasePointerCapture(e.pointerId)
+    start.current = null
+    setActive(false)
+  }
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const s = step
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') onChange(clamp(roundTo(value + s, s)))
+    if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') onChange(clamp(roundTo(value - s, s)))
+  }
+
+  const r = size / 2 - 6
+  const cx = size / 2
+  const cy = size / 2
+  const indicatorX = cx + Math.cos((angle * Math.PI) / 180) * (r - 6)
+  const indicatorY = cy + Math.sin((angle * Math.PI) / 180) * (r - 6)
+
+  return (
+    <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      <svg
+        width={size}
+        height={size}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onKeyDown={onKeyDown}
+        role="slider"
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        tabIndex={0}
+        style={{ cursor: 'ns-resize', outline: active ? '1px solid var(--accent)' : 'none', borderRadius: 8 }}
+      >
+        <circle cx={cx} cy={cy} r={r} fill="#0f1217" stroke="#2a3040" />
+        <circle cx={cx} cy={cy} r={r - 8} fill="#161a22" stroke="#202635" />
+        <line x1={cx} y1={cy} x2={indicatorX} y2={indicatorY} stroke="var(--accent)" strokeWidth={3} strokeLinecap="round" />
+      </svg>
+      {label && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+          <span className="label">{label}</span>
+          <span className="value">{formatNumber(value)}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function roundTo(v: number, step: number) {
+  const inv = 1 / step
+  return Math.round(v * inv) / inv
+}
+
+function formatNumber(v: number) {
+  if (Math.abs(v) >= 100) return v.toFixed(0)
+  if (Math.abs(v) >= 10) return v.toFixed(1)
+  return v.toFixed(2)
+}

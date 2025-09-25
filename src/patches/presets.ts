@@ -1,0 +1,37 @@
+import { Patch } from '../audio-engine/engine'
+
+export const presets: Record<string, Patch> = {
+  init: {
+    osc1: { wave: 'sawtooth', detune: 0, finePct: 0 },
+    osc2: { wave: 'square', detune: 0 },
+    mix: 0.0,
+    fm: { enabled: false, ratio: 2, amount: 0 },
+    sub: { enabled: false, octave: 1, level: 0, wave: 'square' },
+  ring: { enabled: false, amount: 1 },
+    filter: { type: 'lowpass', cutoff: 1200, q: 0.8 },
+    envelope: { attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3 },
+    master: { gain: 0.2 },
+  },
+  mellowPad: {
+    osc1: { wave: 'triangle', detune: -5, finePct: 0 },
+    osc2: { wave: 'sawtooth', detune: 3 },
+    mix: 0.35,
+    fm: { enabled: false, ratio: 2, amount: 0 },
+    sub: { enabled: true, octave: 1, level: 0.2, wave: 'sine' },
+  ring: { enabled: false, amount: 1 },
+    filter: { type: 'lowpass', cutoff: 800, q: 1.2 },
+    envelope: { attack: 0.4, decay: 0.8, sustain: 0.8, release: 1.5 },
+    master: { gain: 0.25 },
+  },
+  brightLead: {
+    osc1: { wave: 'square', detune: 3, finePct: 0 },
+    osc2: { wave: 'sawtooth', detune: -6 },
+    mix: 0.5,
+    fm: { enabled: true, ratio: 1.5, amount: 120 },
+    sub: { enabled: false, octave: 1, level: 0, wave: 'square' },
+  ring: { enabled: false, amount: 1 },
+    filter: { type: 'bandpass', cutoff: 1600, q: 0.7 },
+    envelope: { attack: 0.01, decay: 0.15, sustain: 0.5, release: 0.2 },
+    master: { gain: 0.22 },
+  },
+}
