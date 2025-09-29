@@ -148,8 +148,12 @@ export class SynthEngine {
   // initialize pass-through
   this.fxInput.connect(this.fxOutput)
   this.fxOutput.connect(this.master)
-    this.master.connect(this.analyser)
-    this.analyser.connect(this.ctx.destination)
+    // Audio to speakers
+    this.master.connect(this.ctx.destination)
+    // Scope tap: pre-FX (stable, periodic signal for standing waves)
+    try { this.filter.connect(this.analyser) } catch {}
+    // Configure analyser for stable time-domain reads; smoothing doesn't affect time-domain, but set explicitly
+    this.analyser.smoothingTimeConstant = 0
 
     this.lfos = []
     // Init two LFOs
@@ -190,7 +194,8 @@ export class SynthEngine {
   }
 
   applyPatch(p: Partial<Patch> = {}) {
-    this.patch = {
+    const prev = this.patch
+    const next: Patch = {
       ...this.patch,
       ...p,
       osc1: { ...this.patch.osc1, ...(p.osc1 ?? {}) },
@@ -210,52 +215,59 @@ export class SynthEngine {
       arp: { ...(this.patch.arp ?? defaultPatch.arp!), ...(p.arp ?? {}) },
       sequencer: { ...(this.patch.sequencer ?? defaultPatch.sequencer!), ...(p.sequencer ?? {}) },
     }
+    this.patch = next
 
-    this.master.gain.value = this.patch.master.gain
-    this.filter.type = this.patch.filter.type
-    this.filter.Q.value = this.patch.filter.q
-    this.filter.frequency.setTargetAtTime(this.patch.filter.cutoff, this.ctx.currentTime, 0.01)
+    // Master gain smoothing
+    if (next.master.gain !== prev.master.gain) {
+      this.master.gain.setTargetAtTime(next.master.gain, this.ctx.currentTime, 0.01)
+    }
+
+    // Filter updates with smoothing
+    if (next.filter.type !== prev.filter.type) this.filter.type = next.filter.type
+    if (next.filter.q !== prev.filter.q) this.filter.Q.setTargetAtTime(next.filter.q, this.ctx.currentTime, 0.02)
+    if (next.filter.cutoff !== prev.filter.cutoff) this.filter.frequency.setTargetAtTime(next.filter.cutoff, this.ctx.currentTime, 0.015)
     if (!this.noiseBuffer) this.noiseBuffer = createNoiseBuffer(this.ctx)
 
-    // Rebuild FX chain on patch changes affecting effects
-    this.buildFxChain()
+    // Rebuild FX chain only when effects were part of the change
+    if (p.effects !== undefined) this.buildFxChain()
 
-    // Configure LFOs
-    const lfos = [this.patch.lfo1!, this.patch.lfo2!]
-    for (let i = 0; i < this.lfos.length; i++) {
-      const node = this.lfos[i]
-      const pLfo = lfos[i]
-      node.osc.type = (pLfo.wave as OscillatorType)
-      node.osc.frequency.setValueAtTime(Math.max(0.01, pLfo.rateHz), this.ctx.currentTime)
-      // Disconnect prior routing
-      try { node.gain.disconnect() } catch {}
-      node.dest = 'none'
-      // Amount scaling per destination set below; connect to targets
-      node.gain.gain.value = 0
-      if (pLfo.enabled) {
-        if (pLfo.dest === 'filter') {
-          node.dest = 'filter'
-          // Scale to Hz: up to +/- 2000 Hz
-          node.gain.gain.value = Math.max(0, pLfo.amount) * 2000
-          node.gain.connect(this.filter.frequency)
-        } else if (pLfo.dest === 'amp') {
-          node.dest = 'amp'
-          // Scale relative to master gain to keep within sensible range
-          const base = this.patch.master.gain
-          node.gain.gain.value = Math.max(0, pLfo.amount) * Math.max(0, base) * 0.8
-          node.gain.connect(this.master.gain)
-        } else if (pLfo.dest === 'pitch') {
-          node.dest = 'pitch'
-          // No connection here; per-voice hookup to detune in makeVoice
-          node.gain.gain.value = Math.max(0, pLfo.amount) * 50 // cents
+    // Configure LFOs only when LFOs changed
+    if (p.lfo1 !== undefined || p.lfo2 !== undefined || p.master?.gain !== undefined) {
+      const lfos = [this.patch.lfo1!, this.patch.lfo2!]
+      for (let i = 0; i < this.lfos.length; i++) {
+        const node = this.lfos[i]
+        const pLfo = lfos[i]
+        node.osc.type = (pLfo.wave as OscillatorType)
+        node.osc.frequency.setValueAtTime(Math.max(0.01, pLfo.rateHz), this.ctx.currentTime)
+        // Disconnect prior routing
+        try { node.gain.disconnect() } catch {}
+        node.dest = 'none'
+        // Amount scaling per destination set below; connect to targets
+        node.gain.gain.value = 0
+        if (pLfo.enabled) {
+          if (pLfo.dest === 'filter') {
+            node.dest = 'filter'
+            // Scale to Hz: up to +/- 2000 Hz
+            node.gain.gain.value = Math.max(0, pLfo.amount) * 2000
+            node.gain.connect(this.filter.frequency)
+          } else if (pLfo.dest === 'amp') {
+            node.dest = 'amp'
+            // Scale relative to master gain to keep within sensible range
+            const base = this.patch.master.gain
+            node.gain.gain.value = Math.max(0, pLfo.amount) * Math.max(0, base) * 0.8
+            node.gain.connect(this.master.gain)
+          } else if (pLfo.dest === 'pitch') {
+            node.dest = 'pitch'
+            // No connection here; per-voice hookup to detune in makeVoice
+            node.gain.gain.value = Math.max(0, pLfo.amount) * 50 // cents
+          }
         }
       }
     }
 
-    // Reconfigure arpeggiator scheduling based on patch changes
-    this.updateArpScheduler()
-    // Reconfigure sequencer
-    this.updateSeqScheduler()
+    // Reconfigure arpeggiator/sequencer only when those sections changed
+    if (p.arp !== undefined) this.updateArpScheduler()
+    if (p.sequencer !== undefined) this.updateSeqScheduler()
   }
 
   private buildFxChain() {

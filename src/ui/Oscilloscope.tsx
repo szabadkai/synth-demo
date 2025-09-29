@@ -34,6 +34,7 @@ export function Oscilloscope() {
   const ctx = canvas.getContext('2d')!
     const analyser = (engine as any).getAnalyser() as AnalyserNode
     analyser.fftSize = lock.fft
+    analyser.smoothingTimeConstant = 0
 
     const render = () => {
       const getWave = (engine as any).getWaveform

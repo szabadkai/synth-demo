@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, type State } from '../state/store'
 
 const WHITE_OFFSETS = [0, 2, 4, 5, 7, 9, 11] // C D E F G A B
@@ -39,6 +39,8 @@ export function Keyboard() {
   const engine = useStore((s: State) => s.engine)
   const [active, setActive] = useState<Set<number>>(() => new Set())
   const [baseMidi, setBaseMidi] = useState(60) // C4 by default
+  // Track active pointers -> midi for multi-touch + gliss
+  const pointerToMidi = useRef<Map<number, number>>(new Map())
 
   const noteOn = (midi: number) => {
     engine?.noteOn(midi)
@@ -98,6 +100,41 @@ export function Keyboard() {
   const octave = Math.floor(baseMidi / 12) - 1
   const deltaOct = octave - 4
 
+  // Pointer helpers for touch/mouse
+  const handlePointerDown = (e: React.PointerEvent, midi: number) => {
+    ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+    e.preventDefault()
+    pointerToMidi.current.set(e.pointerId, midi)
+    noteOn(midi)
+  }
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!pointerToMidi.current.has(e.pointerId)) return
+    const prev = pointerToMidi.current.get(e.pointerId)
+    const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+    const attr = el?.dataset?.midi
+    const next = attr != null ? Number(attr) : undefined
+    if (next == null) {
+      // moved off keys
+      if (prev != null) {
+        noteOff(prev)
+        pointerToMidi.current.delete(e.pointerId)
+      }
+      return
+    }
+    if (next !== prev) {
+      if (prev != null) noteOff(prev)
+      pointerToMidi.current.set(e.pointerId, next)
+      noteOn(next)
+    }
+  }
+  const handlePointerUp = (e: React.PointerEvent) => {
+    const prev = pointerToMidi.current.get(e.pointerId)
+    if (prev != null) {
+      noteOff(prev)
+      pointerToMidi.current.delete(e.pointerId)
+    }
+  }
+
   return (
     <div className="keyboard">
       <div className="row" style={{ alignItems: 'center', justifyContent: 'space-between' }}>
@@ -109,15 +146,17 @@ export function Keyboard() {
         </div>
       </div>
       <div className="keys-and-help">
-        <div className="keys-row">
+        <div className="keys-row" style={{ touchAction: 'none' }}>
           {whites.map((midi: number, i: number) => (
             <div
               key={i}
               className="key"
               style={{ background: active.has(midi) ? '#d1d5db' : '#f8fafc' }}
-              onMouseDown={() => noteOn(midi)}
-              onMouseUp={() => noteOff(midi)}
-              onMouseLeave={() => noteOff(midi)}
+              data-midi={midi}
+              onPointerDown={(e) => handlePointerDown(e, midi)}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
             >
               <span className="key-label">{OFFSET_TO_LABEL[midi - baseMidi] ?? ''}</span>
             </div>
@@ -133,9 +172,11 @@ export function Keyboard() {
                 key={`b-${i}`}
                 className="key black"
                 style={{ left, background: active.has(midi) ? '#111827' : '#0b0f16' }}
-                onMouseDown={() => noteOn(midi)}
-                onMouseUp={() => noteOff(midi)}
-                onMouseLeave={() => noteOff(midi)}
+                data-midi={midi}
+                onPointerDown={(e) => handlePointerDown(e, midi)}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
               >
                 <span className="key-label">{OFFSET_TO_LABEL[midi - baseMidi] ?? ''}</span>
               </div>

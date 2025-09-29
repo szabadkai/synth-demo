@@ -158,6 +158,7 @@ select, input[type="number"], input[type="text"] {
 }
 
 .keys-row { position: relative; display: flex; }
+.keys-row { -ms-touch-action: none; touch-action: none; }
 
 .kbd-help {
   display: flex;

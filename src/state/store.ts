@@ -37,7 +37,8 @@ export const useStore = create<State>()(
           sequencer: { ...((get().patch as any).sequencer || defaultPatch.sequencer), ...(p as any).sequencer },
           mix: (p as any).mix != null ? (p as any).mix : get().patch.mix,
         }
-        get().engine?.applyPatch(next)
+        // Apply only the delta to the engine to avoid heavy reconfiguration on unrelated tweaks
+        get().engine?.applyPatch(p)
         set({ patch: next })
       },
       importPatch: (json) => {
