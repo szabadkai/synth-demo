@@ -2,6 +2,9 @@
 
 A browser-based analogue synth simulator using React, TypeScript, Vite, and the Web Audio API.
 
+Repository: https://github.com/szabadkai/synth-demo
+
+
 ## Features (MVP)
 
 - Oscillator (wave + detune)
