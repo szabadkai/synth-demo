@@ -112,7 +112,7 @@ export class SynthEngine {
   private filter: BiquadFilterNode
   private analyser: AnalyserNode
   private noiseBuffer?: AudioBuffer
-  private activeVoices = new Map<number, { stop: (t: number) => void }>()
+  private activeVoices = new Map<number, { stop: (t: number) => void; osc1Detune?: AudioParam; osc2Detune?: AudioParam }>()
   private fxInput: GainNode
   private fxOutput: GainNode
   private currentFxTap: AudioNode | null = null
@@ -268,6 +268,28 @@ export class SynthEngine {
     // Reconfigure arpeggiator/sequencer only when those sections changed
     if (p.arp !== undefined) this.updateArpScheduler()
     if (p.sequencer !== undefined) this.updateSeqScheduler()
+
+    // Live-detune updates for currently playing voices
+    if (p.osc1?.detune !== undefined || p.osc1?.finePct !== undefined) {
+      const now = this.ctx.currentTime
+      const coarse = next.osc1.detune || 0
+      const finePct = (next.osc1.finePct ?? 0) / 100
+      const delta = Math.abs(coarse) * 0.05 * finePct
+      const effectiveDetune = coarse + delta
+      for (const v of this.activeVoices.values()) {
+        if (v.osc1Detune) {
+          try { v.osc1Detune.setTargetAtTime(effectiveDetune, now, 0.01) } catch {}
+        }
+      }
+    }
+    if (p.osc2?.detune !== undefined) {
+      const now = this.ctx.currentTime
+      for (const v of this.activeVoices.values()) {
+        if (v.osc2Detune) {
+          try { v.osc2Detune.setTargetAtTime(next.osc2.detune || 0, now, 0.01) } catch {}
+        }
+      }
+    }
   }
 
   private buildFxChain() {
@@ -788,6 +810,8 @@ export class SynthEngine {
   normalSum.connect(oscGain)
 
   const sources: Array<OscillatorNode | AudioBufferSourceNode> = []
+  let osc1Node: OscillatorNode | null = null
+  let osc2Node: OscillatorNode | null = null
   const lfoParamConnections: Array<{ g: GainNode; p: AudioParam }> = []
 
     // Oscillator 1 (carrier)
@@ -808,6 +832,7 @@ export class SynthEngine {
         const effectiveDetune = coarse + delta
         osc.detune.value = effectiveDetune
         s1 = osc
+        osc1Node = osc
   }
       s1.connect(sub1)
       sources.push(s1)
@@ -852,6 +877,7 @@ export class SynthEngine {
         osc.frequency.setValueAtTime(freq, now)
         osc.detune.value = this.patch.osc2.detune
         s2 = osc
+        osc2Node = osc
       }
   s2.connect(sub2)
       sources.push(s2)
@@ -933,7 +959,12 @@ export class SynthEngine {
       }
     }
 
-    return { stop }
+    // Expose detune params for live updates (only if oscillators, not noise)
+    const voiceHandle: { stop: (t: number) => void; osc1Detune?: AudioParam; osc2Detune?: AudioParam } = { stop }
+    if (osc1Node) voiceHandle.osc1Detune = osc1Node.detune
+    if (osc2Node) voiceHandle.osc2Detune = osc2Node.detune
+
+    return voiceHandle
   }
 
   
