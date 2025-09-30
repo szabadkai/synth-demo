@@ -235,3 +235,55 @@ input[type="range"][disabled] {
   border: 1px solid #5e4707;
   border-radius: 999px;
 }
+
+.expression-overlay {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  background: rgba(17, 19, 25, 0.88);
+  border: 1px solid #2a3040;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+  transition: color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+}
+
+.expression-overlay.active {
+  color: var(--accent);
+  border-color: rgba(104, 211, 145, 0.5);
+  box-shadow: 0 10px 28px rgba(104, 211, 145, 0.35);
+}
+
+.expression-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 11px;
+  margin-bottom: 4px;
+  opacity: 0.8;
+}
+
+.expression-status {
+  font-size: 12px;
+}
+
+.expression-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.expression-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.expression-row p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}

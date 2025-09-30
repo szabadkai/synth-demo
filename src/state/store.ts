@@ -36,6 +36,7 @@ export const useStore = create<State>()(
           arp: { ...((get().patch as any).arp || defaultPatch.arp), ...(p as any).arp },
           sequencer: { ...((get().patch as any).sequencer || defaultPatch.sequencer), ...(p as any).sequencer },
           mix: (p as any).mix != null ? (p as any).mix : get().patch.mix,
+          expression: { ...((get().patch as any).expression || defaultPatch.expression), ...(p as any).expression },
         }
         // Apply only the delta to the engine to avoid heavy reconfiguration on unrelated tweaks
         get().engine?.applyPatch(p)
@@ -61,6 +62,7 @@ export const useStore = create<State>()(
           arp: { ...((get().patch as any).arp || defaultPatch.arp), ...(obj as any).arp },
           sequencer: { ...((get().patch as any).sequencer || defaultPatch.sequencer), ...(obj as any).sequencer },
           mix: (obj as any).mix != null ? (obj as any).mix : get().patch.mix,
+          expression: { ...((get().patch as any).expression || defaultPatch.expression), ...(obj as any).expression },
         }
         get().engine?.applyPatch(merged)
         set({ patch: merged })
@@ -93,6 +95,7 @@ export const useStore = create<State>()(
           arp: { ...defaultPatch.arp!, ...(p.arp || {}) },
           sequencer: { ...defaultPatch.sequencer!, ...(p.sequencer || {}) },
           mix: typeof p.mix === 'number' ? p.mix : defaultPatch.mix,
+          expression: { ...defaultPatch.expression!, ...(p.expression || {}) },
         }
         return { ...persistedState, patch: migratedPatch }
       },

@@ -1,3 +1,5 @@
+import type { ExpressionTarget } from './expressionTargets'
+
 export type WaveType = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'noise'
 
 export type ADSR = {
@@ -62,6 +64,10 @@ export type Patch = {
     length: number
     steps: Array<{ on: boolean; offset: number; velocity: number }>
   }
+  expression?: {
+    x: ExpressionTarget
+    y: ExpressionTarget
+  }
 }
 
 export const defaultPatch: Patch = {
@@ -94,7 +100,162 @@ export const defaultPatch: Patch = {
     length: 16,
     steps: Array.from({ length: 16 }, () => ({ on: false, offset: 0, velocity: 1 })),
   },
+  expression: { x: 'filter.cutoff', y: 'master.gain' },
 }
+
+type ExpressionTargetDefinition = {
+  getBase: (engine: SynthEngine) => number
+  range: (engine: SynthEngine, base: number) => { min: number; max: number }
+  apply: (engine: SynthEngine, value: number) => void
+}
+
+const ensureFinite = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback)
+
+const getLfoPatch = (engine: SynthEngine, which: 'lfo1' | 'lfo2') => engine.patch[which] ?? defaultPatch[which]!
+
+const getMacroPatch = (engine: SynthEngine) => engine.patch.macro ?? defaultPatch.macro!
+
+const EXPRESSION_RUNTIME_TARGETS: Record<ExpressionTarget, ExpressionTargetDefinition> = {
+  'filter.cutoff': {
+    getBase: (engine) => ensureFinite(engine.patch.filter.cutoff, defaultPatch.filter.cutoff),
+    range: (_engine, base) => {
+      const min = clampValue(base * 0.25, 80, 12000)
+      const max = clampValue(base * 4, min + 20, 14000)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ filter: { cutoff: value } }, { fromExpression: true }),
+  },
+  'filter.q': {
+    getBase: (engine) => ensureFinite(engine.patch.filter.q, defaultPatch.filter.q),
+    range: (_engine, base) => {
+      const min = clampValue(base * 0.5, 0.1, 20)
+      const max = clampValue(base * 2.5, min + 0.1, 20)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ filter: { q: value } }, { fromExpression: true }),
+  },
+  'master.gain': {
+    getBase: (engine) => ensureFinite(engine.patch.master.gain, defaultPatch.master.gain),
+    range: (_engine, base) => {
+      const min = clampValue(base * 0.4, 0.01, 1)
+      const max = clampValue(base * 1.6, min + 0.01, 1)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ master: { gain: value } }, { fromExpression: true }),
+  },
+  mix: {
+    getBase: (engine) => ensureFinite(engine.patch.mix, defaultPatch.mix),
+    range: () => ({ min: 0, max: 1 }),
+    apply: (engine, value) => engine.applyPatch({ mix: clampValue(value, 0, 1) }, { fromExpression: true }),
+  },
+  'osc1.detune': {
+    getBase: (engine) => ensureFinite(engine.patch.osc1.detune, defaultPatch.osc1.detune),
+    range: (_engine, base) => {
+      const min = clampValue(base - 120, -2400, 2400)
+      const max = clampValue(base + 120, min + 1, 2400)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ osc1: { detune: value } }, { fromExpression: true }),
+  },
+  'osc2.detune': {
+    getBase: (engine) => ensureFinite(engine.patch.osc2.detune, defaultPatch.osc2.detune),
+    range: (_engine, base) => {
+      const min = clampValue(base - 120, -2400, 2400)
+      const max = clampValue(base + 120, min + 1, 2400)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ osc2: { detune: value } }, { fromExpression: true }),
+  },
+  'fm.amount': {
+    getBase: (engine) => ensureFinite(engine.patch.fm.amount, defaultPatch.fm.amount),
+    range: (_engine, base) => {
+      const min = clampValue(base * 0.5, 0, 4000)
+      const max = clampValue(Math.max(base + 400, 400), min + 10, 4000)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ fm: { amount: clampValue(value, 0, 4000) } }, { fromExpression: true }),
+  },
+  'envelope.attack': {
+    getBase: (engine) => ensureFinite(engine.patch.envelope.attack, defaultPatch.envelope.attack),
+    range: (_engine, base) => {
+      const min = clampValue(base * 0.2, 0.001, 4)
+      const max = clampValue(base * 3, min + 0.01, 4)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ envelope: { attack: value } }, { fromExpression: true }),
+  },
+  'envelope.release': {
+    getBase: (engine) => ensureFinite(engine.patch.envelope.release, defaultPatch.envelope.release),
+    range: (_engine, base) => {
+      const min = clampValue(base * 0.5, 0.03, 6)
+      const max = clampValue(base * 3, min + 0.05, 6)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ envelope: { release: value } }, { fromExpression: true }),
+  },
+  'macro.harmonics': {
+    getBase: (engine) => ensureFinite(getMacroPatch(engine).harmonics, defaultPatch.macro!.harmonics),
+    range: () => ({ min: 0, max: 1 }),
+    apply: (engine, value) => engine.applyPatch({ macro: { harmonics: clampValue(value, 0, 1) } }, { fromExpression: true }),
+  },
+  'macro.timbre': {
+    getBase: (engine) => ensureFinite(getMacroPatch(engine).timbre, defaultPatch.macro!.timbre),
+    range: () => ({ min: 0, max: 1 }),
+    apply: (engine, value) => engine.applyPatch({ macro: { timbre: clampValue(value, 0, 1) } }, { fromExpression: true }),
+  },
+  'macro.morph': {
+    getBase: (engine) => ensureFinite(getMacroPatch(engine).morph, defaultPatch.macro!.morph),
+    range: () => ({ min: 0, max: 1 }),
+    apply: (engine, value) => engine.applyPatch({ macro: { morph: clampValue(value, 0, 1) } }, { fromExpression: true }),
+  },
+  'macro.level': {
+    getBase: (engine) => ensureFinite(getMacroPatch(engine).level, defaultPatch.macro!.level),
+    range: () => ({ min: 0, max: 1 }),
+    apply: (engine, value) => engine.applyPatch({ macro: { level: clampValue(value, 0, 1) } }, { fromExpression: true }),
+  },
+  'lfo1.rateHz': {
+    getBase: (engine) => ensureFinite(getLfoPatch(engine, 'lfo1').rateHz, defaultPatch.lfo1!.rateHz),
+    range: (_engine, base) => {
+      const min = clampValue(base * 0.25, 0.05, 30)
+      const max = clampValue(base * 4, min + 0.05, 40)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ lfo1: { rateHz: value } }, { fromExpression: true }),
+  },
+  'lfo1.amount': {
+    getBase: (engine) => ensureFinite(getLfoPatch(engine, 'lfo1').amount, defaultPatch.lfo1!.amount),
+    range: () => ({ min: 0, max: 1 }),
+    apply: (engine, value) => engine.applyPatch({ lfo1: { amount: clampValue(value, 0, 1) } }, { fromExpression: true }),
+  },
+  'lfo2.rateHz': {
+    getBase: (engine) => ensureFinite(getLfoPatch(engine, 'lfo2').rateHz, defaultPatch.lfo2!.rateHz),
+    range: (_engine, base) => {
+      const min = clampValue(base * 0.25, 0.02, 20)
+      const max = clampValue(base * 4, min + 0.05, 30)
+      return { min, max }
+    },
+    apply: (engine, value) => engine.applyPatch({ lfo2: { rateHz: value } }, { fromExpression: true }),
+  },
+  'lfo2.amount': {
+    getBase: (engine) => ensureFinite(getLfoPatch(engine, 'lfo2').amount, defaultPatch.lfo2!.amount),
+    range: () => ({ min: 0, max: 1 }),
+    apply: (engine, value) => engine.applyPatch({ lfo2: { amount: clampValue(value, 0, 1) } }, { fromExpression: true }),
+  },
+}
+
+type ExpressionAxis = 'x' | 'y'
+
+type DeepPartial<T> = T extends Function
+  ? T
+  : T extends Array<infer U>
+    ? Array<DeepPartial<U>>
+    : T extends object
+      ? { [K in keyof T]?: DeepPartial<T[K]> }
+      : T
+
+const EXPRESSION_AXES: ExpressionAxis[] = ['x', 'y']
+
+const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 function createNoiseBuffer(ctx: AudioContext) {
   const bufferSize = ctx.sampleRate * 1
@@ -117,6 +278,13 @@ export class SynthEngine {
   private fxOutput: GainNode
   private currentFxTap: AudioNode | null = null
   private lfos: Array<{ osc: OscillatorNode; gain: GainNode; dest: 'pitch' | 'filter' | 'amp' | 'none' }>
+  private expression2D: { active: boolean; x: number; y: number } = { active: false, x: 0.5, y: 0.5 }
+  private expressionAxisTargets: Record<ExpressionAxis, ExpressionTarget> = {
+    x: defaultPatch.expression!.x,
+    y: defaultPatch.expression!.y,
+  }
+  private expressionSnapshot: Record<ExpressionAxis, number | null> = { x: null, y: null }
+  private expressionApplying = false
   patch: Patch
 
   // Arpeggiator state
@@ -193,7 +361,8 @@ export class SynthEngine {
     if (this.ctx.state !== 'running') await this.ctx.resume()
   }
 
-  applyPatch(p: Partial<Patch> = {}) {
+  applyPatch(p: DeepPartial<Patch> = {}, options: { fromExpression?: boolean } = {}) {
+    const { fromExpression = false } = options
     const prev = this.patch
     const next: Patch = {
       ...this.patch,
@@ -209,13 +378,22 @@ export class SynthEngine {
       mix: p.mix != null ? p.mix : this.patch.mix,
       engineMode: p.engineMode ?? this.patch.engineMode ?? 'classic',
       macro: { ...(this.patch.macro ?? defaultPatch.macro!), ...(p.macro ?? {}) },
-      effects: { ...(this.patch.effects ?? defaultPatch.effects!), ...(p.effects ?? {}) },
+      effects: {
+        ...(this.patch.effects ?? defaultPatch.effects!),
+        ...(p.effects ?? {}),
+      } as Patch['effects'],
       lfo1: { ...(this.patch.lfo1 ?? defaultPatch.lfo1!), ...(p.lfo1 ?? {}) },
       lfo2: { ...(this.patch.lfo2 ?? defaultPatch.lfo2!), ...(p.lfo2 ?? {}) },
       arp: { ...(this.patch.arp ?? defaultPatch.arp!), ...(p.arp ?? {}) },
-      sequencer: { ...(this.patch.sequencer ?? defaultPatch.sequencer!), ...(p.sequencer ?? {}) },
+      sequencer: {
+        ...(this.patch.sequencer ?? defaultPatch.sequencer!),
+        ...(p.sequencer ?? {}),
+      } as Patch['sequencer'],
+      expression: { ...(this.patch.expression ?? defaultPatch.expression!), ...(p.expression ?? {}) },
     }
     this.patch = next
+
+    this.configureExpressionRouting(next.expression)
 
     // Master gain smoothing
     if (next.master.gain !== prev.master.gain) {
@@ -290,6 +468,8 @@ export class SynthEngine {
         }
       }
     }
+
+    if (this.expression2D.active && !fromExpression) this.applyExpression2D()
   }
 
   private buildFxChain() {
@@ -314,6 +494,87 @@ export class SynthEngine {
   }
 
   private clamp01(x: number) { return Math.min(1, Math.max(0, x)) }
+
+  setExpression2D(x: number, y: number) {
+    const nx = this.clamp01(x)
+    const ny = this.clamp01(y)
+    if (!this.expression2D.active) {
+      this.captureExpressionBase()
+    }
+    this.expression2D = { active: true, x: nx, y: ny }
+    this.applyExpression2D()
+  }
+
+  clearExpression2D() {
+    if (!this.expression2D.active) return
+    this.expressionApplying = true
+    try {
+      for (const axis of EXPRESSION_AXES) this.resetExpressionAxis(axis)
+    } finally {
+      this.expressionApplying = false
+      this.expression2D = { active: false, x: 0.5, y: 0.5 }
+      this.expressionSnapshot = { x: null, y: null }
+    }
+  }
+
+  private configureExpressionRouting(expression = this.patch.expression ?? defaultPatch.expression!) {
+    const fallback = defaultPatch.expression ?? { x: 'filter.cutoff', y: 'master.gain' }
+    for (const axis of EXPRESSION_AXES) {
+      const requested = expression?.[axis] ?? fallback[axis]
+      const supported = EXPRESSION_RUNTIME_TARGETS[requested] ? requested : fallback[axis]
+      if (this.expressionAxisTargets[axis] !== supported || !this.expression2D.active) {
+        this.expressionSnapshot[axis] = null
+      }
+      this.expressionAxisTargets[axis] = supported
+    }
+  }
+
+  private captureExpressionBase() {
+    for (const axis of EXPRESSION_AXES) {
+      const target = this.expressionAxisTargets[axis]
+      const def = EXPRESSION_RUNTIME_TARGETS[target]
+      if (!def) continue
+      const base = def.getBase(this)
+      this.expressionSnapshot[axis] = Number.isFinite(base) ? base : 0
+    }
+  }
+
+  private applyExpressionAxis(axis: ExpressionAxis, normalized: number) {
+    const target = this.expressionAxisTargets[axis]
+    const def = EXPRESSION_RUNTIME_TARGETS[target]
+    if (!def) return
+
+    let base = this.expressionSnapshot[axis]
+    if (base == null || Number.isNaN(base)) {
+      base = def.getBase(this)
+      this.expressionSnapshot[axis] = base
+    }
+    const { min, max } = def.range(this, base)
+    const span = max - min
+    const value = span <= 0 ? base : min + span * this.clamp01(normalized)
+    def.apply(this, value)
+  }
+
+  private resetExpressionAxis(axis: ExpressionAxis) {
+    const base = this.expressionSnapshot[axis]
+    const target = this.expressionAxisTargets[axis]
+    const def = EXPRESSION_RUNTIME_TARGETS[target]
+    if (def && base != null && Number.isFinite(base)) {
+      def.apply(this, base)
+    }
+    this.expressionSnapshot[axis] = null
+  }
+
+  private applyExpression2D() {
+    if (!this.expression2D.active || this.expressionApplying) return
+    this.expressionApplying = true
+    try {
+      this.applyExpressionAxis('x', this.expression2D.x)
+      this.applyExpressionAxis('y', this.expression2D.y)
+    } finally {
+      this.expressionApplying = false
+    }
+  }
 
   private applyDelayEffect(input: AudioNode, params: { time: number; feedback: number; mix: number }) {
     const mix = this.clamp01(params.mix)

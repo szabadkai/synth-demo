@@ -12,6 +12,8 @@ import { EffectsPanel } from './EffectsPanel'
 import { LFOPanel } from './LFOPanel'
 import { ArpPanel } from './ArpPanel'
 import { SequencerPanel } from './SequencerPanel'
+import { ExpressionSurface } from './ExpressionSurface'
+import { ExpressionPanel } from './ExpressionPanel'
 
 export function App() {
   const engine = useStore((s: State) => s.engine)
@@ -89,6 +91,10 @@ export function App() {
             <h3>Sequencer</h3>
             <SequencerPanel />
           </section>
+          <section className="panel" style={{ gridColumn: 'span 2' }}>
+            <h3>Expression</h3>
+            <ExpressionPanel />
+          </section>
           <section className="panel">
             <h3>Filter</h3>
             <FilterPanel />
@@ -103,6 +109,7 @@ export function App() {
           </section>
         </div>
       </main>
+      <ExpressionSurface />
     </div>
   )
 }

@@ -58,29 +58,32 @@ export function Keyboard() {
   useEffect(() => {
     // map to relative semitone offsets from baseMidi
     const down = new Set<string>()
+    const normalizeKey = (key: string) => (key.length === 1 ? key.toLowerCase() : key)
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return
+      const key = normalizeKey(e.key)
       // octave shift
-      if (e.key === 'z') {
+      if (key === 'z') {
         setBaseMidi((m: number) => Math.max(24, m - 12))
         return
       }
-      if (e.key === 'x') {
+      if (key === 'x') {
         setBaseMidi((m: number) => Math.min(96, m + 12))
         return
       }
-      const off = REL_MAP[e.key]
+      const off = REL_MAP[key]
       const midi = off != null ? baseMidi + off : undefined
-      if (midi != null && !down.has(e.key)) {
-        down.add(e.key)
+      if (midi != null && !down.has(key)) {
+        down.add(key)
         noteOn(midi)
       }
     }
     const onKeyUp = (e: KeyboardEvent) => {
-      const off = REL_MAP[e.key]
+      const key = normalizeKey(e.key)
+      const off = REL_MAP[key]
       const midi = off != null ? baseMidi + off : undefined
       if (midi != null) {
-        down.delete(e.key)
+        down.delete(key)
         noteOff(midi)
       }
     }
