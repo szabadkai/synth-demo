@@ -5,8 +5,10 @@ import { SynthEngine, Patch, defaultPatch } from '../audio-engine/engine'
 export type State = {
   engine: SynthEngine | null
   patch: Patch
+  layoutOrder: string[]
   setEngine: (e: SynthEngine) => void
   updatePatch: (p: Partial<Patch>) => void
+  setLayoutOrder: (ids: string[]) => void
   importPatch: (json: string) => void
   exportPatch: () => string
 }
@@ -16,6 +18,7 @@ export const useStore = create<State>()(
     (set, get) => ({
       engine: null,
       patch: defaultPatch,
+      layoutOrder: [],
       setEngine: (e) => set({ engine: e }),
       updatePatch: (p) => {
         const next = {
@@ -42,6 +45,7 @@ export const useStore = create<State>()(
         get().engine?.applyPatch(p)
         set({ patch: next })
       },
+      setLayoutOrder: (ids) => set({ layoutOrder: ids }),
       importPatch: (json) => {
         const obj = JSON.parse(json)
         const merged = {
@@ -71,7 +75,7 @@ export const useStore = create<State>()(
     }),
     {
       name: 'websynth-patch',
-      partialize: (state) => ({ patch: state.patch }),
+      partialize: (state) => ({ patch: state.patch, layoutOrder: state.layoutOrder }),
       version: 7,
       migrate: (persistedState: any, version: number) => {
         // Ensure new fields (osc2, mix) exist by merging with defaults
@@ -97,12 +101,16 @@ export const useStore = create<State>()(
           mix: typeof p.mix === 'number' ? p.mix : defaultPatch.mix,
           expression: { ...defaultPatch.expression!, ...(p.expression || {}) },
         }
-        return { ...persistedState, patch: migratedPatch }
+        const layoutOrder: string[] = Array.isArray(persistedState?.layoutOrder)
+          ? persistedState.layoutOrder.filter((id: unknown) => typeof id === 'string')
+          : []
+        return { ...persistedState, patch: migratedPatch, layoutOrder }
       },
       onRehydrateStorage: () => (state) => {
         // Ensure engine is not restored from storage
         if (!state) return
         state.engine = null
+        if (!Array.isArray(state.layoutOrder)) state.layoutOrder = []
       },
     }
   )
