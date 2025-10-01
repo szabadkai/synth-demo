@@ -128,38 +128,22 @@ export function OscillatorPanel() {
         </select>
       </label>
 
-      {/* Row: Detune (only Osc 1) */}
-      <Knob
-        label="Detune (c)"
-        min={-1200}
-        max={1200}
-        step={1}
-        value={patch.osc1.detune}
-        onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, detune: v } })}
-      />
-      <div />
-
-      {/* Row: Fine (only Osc 1) */}
-      <Slider
-        label="Fine (% of detune)"
-        min={-100}
-        max={100}
-        step={1}
-        value={patch.osc1.finePct ?? 0}
-        onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, finePct: v } })}
-      />
-      <div />
-
-      {/* Row: Mix spanning both columns */}
-      <div style={{ gridColumn: '1 / -1' }}>
-        <Slider
-          label="Mix (1↔2)"
-          min={0}
-          max={1}
-          step={0.01}
-          value={patch.mix}
-          onChange={(v: number) => updatePatch({ mix: v })}
-        />
+      {/* Osc 1 controls row */}
+      <div className="osc-knob-row" style={{ gridColumn: '1 / 2' }}>
+        <div className="knob-group">
+          <span className="label">Detune</span>
+          <Knob label={undefined} min={-1200} max={1200} step={1} value={patch.osc1.detune} onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, detune: v } })} />
+        </div>
+        <div className="knob-group">
+          <span className="label">Fine %</span>
+          <Knob label={undefined} min={-100} max={100} step={1} value={patch.osc1.finePct ?? 0} onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, finePct: v } })} />
+        </div>
+      </div>
+      <div className="osc-knob-row" style={{ gridColumn: '2 / 3', justifyContent: 'flex-end' }}>
+        <div className="knob-group">
+          <span className="label">Mix</span>
+          <Knob label={undefined} min={0} max={1} step={0.01} value={patch.mix} onChange={(v: number) => updatePatch({ mix: v })} />
+        </div>
       </div>
 
       {/* Row: FM Controls spanning both columns */}
@@ -197,59 +181,6 @@ export function OscillatorPanel() {
           value={patch.fm?.amount ?? 0}
           onChange={(v: number) => updatePatch({ fm: { ...patch.fm, amount: v } })}
           disabled={!(patch.fm?.enabled ?? false)}
-        />
-      </div>
-
-      {/* Row: Sub Oscillator Controls spanning both columns */}
-      <div
-        style={{
-          gridColumn: '1 / -1',
-          display: 'grid',
-          gridTemplateColumns: 'auto auto 1fr 1fr',
-          gap: 12,
-          alignItems: 'center',
-        }}
-      >
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 120 }}>
-          <input
-            type="checkbox"
-            checked={patch.sub?.enabled ?? false}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updatePatch({ sub: { ...patch.sub, enabled: e.target.checked } })}
-          />
-          <span className="label">Sub</span>
-        </label>
-        <label>
-          <div className="label">Octave</div>
-          <select
-            value={patch.sub?.octave ?? 1}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => updatePatch({ sub: { ...patch.sub, octave: Number(e.target.value) as 1 | 2 } })}
-            disabled={!(patch.sub?.enabled ?? false)}
-          >
-            <option value={1}>-1</option>
-            <option value={2}>-2</option>
-          </select>
-        </label>
-        <label>
-          <div className="label">Wave</div>
-          <select
-            value={patch.sub?.wave ?? 'square'}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => updatePatch({ sub: { ...patch.sub, wave: e.target.value as any } })}
-            disabled={!(patch.sub?.enabled ?? false)}
-          >
-            <option value="sine">Sine</option>
-            <option value="square">Square</option>
-            <option value="sawtooth">Saw</option>
-            <option value="triangle">Triangle</option>
-          </select>
-        </label>
-        <Slider
-          label="Level"
-          min={0}
-          max={1}
-          step={0.01}
-          value={patch.sub?.level ?? 0}
-          onChange={(v: number) => updatePatch({ sub: { ...patch.sub, level: v } })}
-          disabled={!(patch.sub?.enabled ?? false)}
         />
       </div>
 

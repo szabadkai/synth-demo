@@ -9,13 +9,13 @@ function LfoRow({ idx }: { idx: 1 | 2 }) {
   const lfo = (patch as any)[key] || { enabled: false, wave: 'sine', rateHz: 5, amount: 0.2, dest: 'pitch' }
 
   return (
-    <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div className="lfo-row">
+      <label className="lfo-toggle">
         <input type="checkbox" checked={lfo.enabled} onChange={(e) => update({ [key]: { ...lfo, enabled: e.target.checked } } as any)} />
         <span className="label">LFO {idx}</span>
       </label>
-      <label>
-        <div className="label">Wave</div>
+      <label className="lfo-select">
+        <span className="label">Wave</span>
         <select value={lfo.wave} onChange={(e) => update({ [key]: { ...lfo, wave: e.target.value } } as any)}>
           <option value="sine">Sine</option>
           <option value="triangle">Triangle</option>
@@ -23,16 +23,22 @@ function LfoRow({ idx }: { idx: 1 | 2 }) {
           <option value="sawtooth">Saw</option>
         </select>
       </label>
-      <label>
-        <div className="label">Dest</div>
+      <label className="lfo-select">
+        <span className="label">Dest</span>
         <select value={lfo.dest} onChange={(e) => update({ [key]: { ...lfo, dest: e.target.value } } as any)}>
           <option value="pitch">Pitch</option>
           <option value="filter">Filter</option>
           <option value="amp">Amp</option>
         </select>
       </label>
-      <Knob label="Rate (Hz)" min={0.01} max={20} step={0.01} value={lfo.rateHz} onChange={(v) => update({ [key]: { ...lfo, rateHz: v } } as any)} disabled={!lfo.enabled} />
-      <Knob label="Amount" min={0} max={1} step={0.01} value={lfo.amount} onChange={(v) => update({ [key]: { ...lfo, amount: v } } as any)} disabled={!lfo.enabled} />
+      <div className="knob-group">
+        <span className="label">Rate</span>
+        <Knob label={undefined} min={0.01} max={20} step={0.01} value={lfo.rateHz} onChange={(v) => update({ [key]: { ...lfo, rateHz: v } } as any)} disabled={!lfo.enabled} />
+      </div>
+      <div className="knob-group">
+        <span className="label">Amount</span>
+        <Knob label={undefined} min={0} max={1} step={0.01} value={lfo.amount} onChange={(v) => update({ [key]: { ...lfo, amount: v } } as any)} disabled={!lfo.enabled} />
+      </div>
     </div>
   )
 }

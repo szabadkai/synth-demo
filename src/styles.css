@@ -635,9 +635,9 @@ input[type="range"][disabled] {
 }
 
 .filter-knobs {
-  display: flex;
-  gap: 12px;
-  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+  align-items: flex-end;
   flex-wrap: wrap;
 }
 
@@ -666,6 +666,33 @@ input[type="range"][disabled] {
   gap: 12px;
 }
 
+.oscilloscope-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.oscilloscope-stack canvas {
+  height: 160px !important;
+}
+
+.oscilloscope-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.oscilloscope-row > * {
+  flex: 1 1 260px;
+}
+
+.arp-status {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
 .envelope-panel {
   display: flex;
   justify-content: center;
@@ -673,9 +700,43 @@ input[type="range"][disabled] {
 
 .envelope-knobs {
   display: inline-flex;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
   justify-content: center;
+}
+
+.knob-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.osc-knob-row {
+  display: inline-flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.lfo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lfo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 80px;
+}
+
+.lfo-select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .expression-panel {
   display: flex;

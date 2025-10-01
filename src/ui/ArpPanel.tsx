@@ -10,10 +10,20 @@ export function ArpPanel() {
   const tempo = useStore((s: State) => s.transport.tempo)
   const setTempo = useStore((s: State) => s.setTempo)
   const arp = (patch.arp ?? defaultPatch.arp)!
+  const [status, setStatus] = React.useState<{ enabled: boolean; stepIndex: number; length: number }>({ enabled: false, stepIndex: 0, length: 0 })
 
   const setArp = (changes: Partial<typeof arp>) => {
     update({ arp: { ...arp, ...changes } })
   }
+
+  React.useEffect(() => {
+    if (!engine) return
+    const id = setInterval(() => {
+      const s = (engine as any).getArpStatus?.()
+      if (s) setStatus(s)
+    }, 120)
+    return () => clearInterval(id)
+  }, [engine])
 
   return (
     <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>

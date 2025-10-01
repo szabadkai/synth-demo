@@ -54,15 +54,21 @@ export function App() {
   }
 
   const panels: DashboardPanelConfig[] = [
-    { id: 'oscilloscope', title: 'Oscilloscope', span: 2, render: () => <Oscilloscope /> },
+    { id: 'oscilloscope', title: 'Oscilloscope', span: 2, render: () => (
+      <div className="oscilloscope-stack">
+        <Oscilloscope />
+        <div className="oscilloscope-row">
+          <FilterPanel />
+          <EnvelopePanel />
+        </div>
+      </div>
+    ) },
     { id: 'oscillator', title: 'Oscillator', span: 2, render: () => <OscillatorPanel /> },
     { id: 'effects', title: 'Effects', span: 2, render: () => <EffectsPanel /> },
     { id: 'lfos', title: 'LFOs', span: 2, render: () => <LFOPanel /> },
     { id: 'arp', title: 'Arpeggiator', span: 2, render: () => <ArpPanel /> },
     { id: 'sequencer', title: 'Sequencer', span: 2, render: () => <SequencerPanel /> },
     { id: 'drum', title: 'Drum Machine', span: 2, render: () => <DrumMachinePanel /> },
-    { id: 'filter', title: 'Filter', render: () => <FilterPanel /> },
-    { id: 'envelope', title: 'Envelope', render: () => <EnvelopePanel /> },
     { id: 'keyboard', title: 'Keyboard', span: 2, render: () => <Keyboard /> },
   ]
 

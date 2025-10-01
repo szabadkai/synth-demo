@@ -188,27 +188,6 @@ export function SequencerPanel() {
               )
             })}
           </div>
-          {status.enabled && status.length > 0 && (
-            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
-              <div className="label" style={{ minWidth: 64 }}>Pattern</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {Array.from({ length: Math.min(status.length, 16) }).map((_, i) => (
-                  <span
-                    key={i}
-                    title={`Step ${i + 1}`}
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 999,
-                      background: i === (status.stepIndex % Math.min(status.length, 16)) ? 'var(--accent)' : '#2a3040',
-                      display: 'inline-block'
-                    }}
-                  />
-                ))}
-                {status.length > 16 && <span className="value">+{status.length - 16}</span>}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

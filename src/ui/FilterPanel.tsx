@@ -14,7 +14,7 @@ export function FilterPanel() {
   return (
     <div className="filter-panel">
       <label className="filter-type">
-        <span className="label">Type</span>
+        <span className="label">Filter Type</span>
         <select value={patch.filter.type} onChange={(e) => handleFilterChange({ type: e.target.value as BiquadFilterType })}>
           <option value="lowpass">Low-pass</option>
           <option value="highpass">High-pass</option>
@@ -23,9 +23,18 @@ export function FilterPanel() {
         </select>
       </label>
       <div className="filter-knobs">
-        <Knob label="Cutoff" min={40} max={8000} step={10} value={patch.filter.cutoff} onChange={(v) => handleFilterChange({ cutoff: v })} />
-        <Knob label="Resonance" min={0.1} max={10} step={0.1} value={patch.filter.q} onChange={(v) => handleFilterChange({ q: v })} />
-        <Knob label="Master" min={0} max={1} step={0.01} value={masterGain} onChange={(v) => updatePatch({ master: { ...patch.master, gain: v } })} />
+        <div className="knob-group">
+          <span className="label">Cutoff</span>
+          <Knob label={undefined} min={40} max={8000} step={10} value={patch.filter.cutoff} onChange={(v) => handleFilterChange({ cutoff: v })} />
+        </div>
+        <div className="knob-group">
+          <span className="label">Resonance</span>
+          <Knob label={undefined} min={0.1} max={10} step={0.1} value={patch.filter.q} onChange={(v) => handleFilterChange({ q: v })} />
+        </div>
+        <div className="knob-group">
+          <span className="label">Master</span>
+          <Knob label={undefined} min={0} max={1} step={0.01} value={masterGain} onChange={(v) => updatePatch({ master: { ...patch.master, gain: v } })} />
+        </div>
       </div>
     </div>
   )
