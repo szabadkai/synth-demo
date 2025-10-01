@@ -1408,7 +1408,7 @@ export class SynthEngine {
     if (shouldRun) {
       if (this.seqTimer != null) { clearTimeout(this.seqTimer); this.seqTimer = null }
       this.seqPhase = 0
-      this.seqStepIndex = this.seqStepIndex % Math.max(1, seq.length)
+      this.seqStepIndex = 0
       this.scheduleNextSeqTick()
     } else {
       if (this.seqTimer != null) { clearTimeout(this.seqTimer); this.seqTimer = null }

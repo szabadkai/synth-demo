@@ -15,6 +15,8 @@ import { DashboardGrid, type DashboardPanelConfig } from './DashboardGrid'
 import { PatchPanel } from './PatchPanel'
 import { ExpressionPanel } from './ExpressionPanel'
 import { SettingsModal } from './SettingsModal'
+import { DrumMachinePanel } from './DrumMachinePanel'
+import { TransportTicker } from './TransportTicker'
 
 export function App() {
   const engine = useStore((s: State) => s.engine)
@@ -58,6 +60,7 @@ export function App() {
     { id: 'lfos', title: 'LFOs', span: 2, render: () => <LFOPanel /> },
     { id: 'arp', title: 'Arpeggiator', span: 2, render: () => <ArpPanel /> },
     { id: 'sequencer', title: 'Sequencer', span: 2, render: () => <SequencerPanel /> },
+    { id: 'drum', title: 'Drum Machine', span: 2, render: () => <DrumMachinePanel /> },
     { id: 'filter', title: 'Filter', render: () => <FilterPanel /> },
     { id: 'envelope', title: 'Envelope', render: () => <EnvelopePanel /> },
     { id: 'keyboard', title: 'Keyboard', span: 2, render: () => <Keyboard /> },
@@ -89,6 +92,7 @@ export function App() {
           <ExpressionPanel />
         </section>
       </SettingsModal>
+      <TransportTicker />
     </div>
   )
 }

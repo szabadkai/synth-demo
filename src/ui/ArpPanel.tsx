@@ -7,18 +7,13 @@ export function ArpPanel() {
   const patch = useStore((s: State) => s.patch)
   const update = useStore((s: State) => s.updatePatch)
   const engine = useStore((s: State) => s.engine)
+  const tempo = useStore((s: State) => s.transport.tempo)
+  const setTempo = useStore((s: State) => s.setTempo)
   const arp = (patch.arp ?? defaultPatch.arp)!
 
-  // Poll engine for current step/length to render a simple indicator
-  const [status, setStatus] = React.useState<{ enabled: boolean; stepIndex: number; length: number }>({ enabled: false, stepIndex: 0, length: 0 })
-  React.useEffect(() => {
-    if (!engine) return
-    const id = setInterval(() => {
-      const s = (engine as any).getArpStatus?.()
-      if (s) setStatus(s)
-    }, 100)
-    return () => clearInterval(id)
-  }, [engine])
+  const setArp = (changes: Partial<typeof arp>) => {
+    update({ arp: { ...arp, ...changes } })
+  }
 
   return (
     <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
@@ -72,30 +67,29 @@ export function ArpPanel() {
           <option value={4}>4</option>
         </select>
       </label>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input
-          type="checkbox"
-          checked={arp.bpmSync || false}
-          onChange={(e) => update({ arp: { ...arp, bpmSync: e.target.checked } })}
-          disabled={!arp.enabled}
-        />
-        <span className="label">Sync to BPM</span>
+      <label>
+        <div className="label">Division</div>
+        <select value={arp.division} onChange={(e) => setArp({ division: e.target.value as any })} disabled={!arp.enabled}>
+          <option value="1/4">1/4</option>
+          <option value="1/8">1/8</option>
+          <option value="1/8T">1/8T</option>
+          <option value="1/16">1/16</option>
+          <option value="1/16T">1/16T</option>
+        </select>
       </label>
-      {arp.bpmSync ? (
-        <label>
-          <div className="label">Division</div>
-          <select value={arp.division} onChange={(e) => update({ arp: { ...arp, division: e.target.value as any } })} disabled={!arp.enabled}>
-            <option value="1/4">1/4</option>
-            <option value="1/8">1/8</option>
-            <option value="1/8T">1/8T</option>
-            <option value="1/16">1/16</option>
-            <option value="1/16T">1/16T</option>
-          </select>
-        </label>
-      ) : (
-        <Slider label="Rate (Hz)" min={0.1} max={20} step={0.1} value={arp.rateHz} onChange={(v) => update({ arp: { ...arp, rateHz: v } })} disabled={!arp.enabled} />
-      )}
-      <Slider label="BPM" min={40} max={240} step={1} value={arp.bpm || 120} onChange={(v) => update({ arp: { ...arp, bpm: v } })} disabled={!arp.enabled || !arp.bpmSync} format={(v) => `${Math.round(v)}`} />
+      <Slider
+        label="BPM"
+        min={40}
+        max={240}
+        step={1}
+        value={tempo}
+        onChange={(v) => {
+          setTempo(v)
+          setArp({ bpm: v, bpmSync: true })
+        }}
+        disabled={!arp.enabled}
+        format={(v) => `${Math.round(v)}`}
+      />
 
       {/* Row 3: gate across */}
       <div style={{ gridColumn: '1 / -1' }}>
@@ -121,25 +115,6 @@ export function ArpPanel() {
       </div>
 
       {/* Row 5: Step indicator */}
-      {status.enabled && status.length > 0 && (
-        <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <div className="label" style={{ minWidth: 64 }}>Pattern</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {Array.from({ length: Math.min(status.length, 16) }).map((_, i) => (
-              <span
-                key={i}
-                title={`Step ${i + 1}`}
-                style={{
-                  width: 8, height: 8, borderRadius: 999,
-                  background: i === (status.stepIndex % Math.min(status.length, 16)) ? 'var(--accent)' : '#2a3040',
-                  display: 'inline-block'
-                }}
-              />
-            ))}
-            {status.length > 16 && <span className="value">+{status.length - 16}</span>}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

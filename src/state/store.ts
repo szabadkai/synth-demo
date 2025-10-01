@@ -6,9 +6,18 @@ export type State = {
   engine: SynthEngine | null
   patch: Patch
   layoutOrder: string[]
+  transport: {
+    tempo: number
+    playing: boolean
+    tick: number
+  }
   setEngine: (e: SynthEngine) => void
   updatePatch: (p: Partial<Patch>) => void
   setLayoutOrder: (ids: string[]) => void
+  tempo: number
+  setTempo: (bpm: number) => void
+  setTransportPlaying: (playing: boolean) => void
+  bumpTransportTick: () => void
   importPatch: (json: string) => void
   exportPatch: () => string
 }
@@ -19,6 +28,8 @@ export const useStore = create<State>()(
       engine: null,
       patch: defaultPatch,
       layoutOrder: [],
+      tempo: 110,
+      transport: { tempo: 110, playing: false, tick: 0 },
       setEngine: (e) => set({ engine: e }),
       updatePatch: (p) => {
         const next = {
@@ -46,6 +57,9 @@ export const useStore = create<State>()(
         set({ patch: next })
       },
       setLayoutOrder: (ids) => set({ layoutOrder: ids }),
+      setTempo: (bpm) => set((state) => ({ tempo: bpm, transport: { ...state.transport, tempo: bpm } })),
+      setTransportPlaying: (playing) => set((state) => ({ transport: { ...state.transport, playing, tick: 0 } })),
+      bumpTransportTick: () => set((state) => ({ transport: { ...state.transport, tick: state.transport.tick + 1 } })),
       importPatch: (json) => {
         const obj = JSON.parse(json)
         const merged = {
@@ -75,7 +89,16 @@ export const useStore = create<State>()(
     }),
     {
       name: 'websynth-patch',
-      partialize: (state) => ({ patch: state.patch, layoutOrder: state.layoutOrder }),
+      partialize: (state) => ({
+        patch: {
+          ...state.patch,
+          sequencer: state.patch.sequencer ? { ...state.patch.sequencer, playing: false } : state.patch.sequencer,
+          arp: state.patch.arp ? { ...state.patch.arp, bpmSync: state.patch.arp.bpmSync ?? true } : state.patch.arp,
+        },
+        layoutOrder: state.layoutOrder,
+        tempo: state.tempo,
+        transport: { tempo: state.transport.tempo, playing: false, tick: 0 },
+      }),
       version: 7,
       migrate: (persistedState: any, version: number) => {
         // Ensure new fields (osc2, mix) exist by merging with defaults
@@ -104,13 +127,20 @@ export const useStore = create<State>()(
         const layoutOrder: string[] = Array.isArray(persistedState?.layoutOrder)
           ? persistedState.layoutOrder.filter((id: unknown) => typeof id === 'string')
           : []
-        return { ...persistedState, patch: migratedPatch, layoutOrder }
+        const tempo = typeof persistedState?.tempo === 'number' ? persistedState.tempo : 110
+        const transport = persistedState?.transport
+        const migratedTransport = transport
+          ? { tempo: transport.tempo ?? tempo, playing: false, tick: 0 }
+          : { tempo, playing: false, tick: 0 }
+        return { ...persistedState, patch: migratedPatch, layoutOrder, tempo, transport: migratedTransport }
       },
       onRehydrateStorage: () => (state) => {
         // Ensure engine is not restored from storage
         if (!state) return
         state.engine = null
         if (!Array.isArray(state.layoutOrder)) state.layoutOrder = []
+        if (typeof state.tempo !== 'number') state.tempo = 110
+        if (!state.transport) state.transport = { tempo: state.tempo, playing: false, tick: 0 }
       },
     }
   )

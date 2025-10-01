@@ -8,9 +8,10 @@ type Props = {
   size?: number
   label?: string
   onChange: (v: number) => void
+  disabled?: boolean
 }
 
-export function Knob({ value, min, max, step = 0.01, size = 56, label, onChange }: Props) {
+export function Knob({ value, min, max, step = 0.01, size = 56, label, onChange, disabled = false }: Props) {
   const [active, setActive] = useState(false)
   const start = useRef<{ y: number; v: number } | null>(null)
   const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
@@ -19,23 +20,26 @@ export function Knob({ value, min, max, step = 0.01, size = 56, label, onChange 
   const angle = useMemo(() => -135 + norm * 270, [norm])
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (disabled) return
     ;(e.target as Element).setPointerCapture(e.pointerId)
     start.current = { y: e.clientY, v: value }
     setActive(true)
   }
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!start.current) return
+    if (!start.current || disabled) return
     const dy = start.current.y - e.clientY
     const delta = (dy / 150) * range
     const next = clamp(start.current.v + delta)
     onChange(roundTo(next, step))
   }
   const onPointerUp = (e: React.PointerEvent) => {
+    if (disabled) return
     ;(e.target as Element).releasePointerCapture(e.pointerId)
     start.current = null
     setActive(false)
   }
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return
     const s = step
     if (e.key === 'ArrowUp' || e.key === 'ArrowRight') onChange(clamp(roundTo(value + s, s)))
     if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') onChange(clamp(roundTo(value - s, s)))
@@ -48,7 +52,7 @@ export function Knob({ value, min, max, step = 0.01, size = 56, label, onChange 
   const indicatorY = cy + Math.sin((angle * Math.PI) / 180) * (r - 6)
 
   return (
-    <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+    <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 6, opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
       <svg
         width={size}
         height={size}
@@ -61,8 +65,8 @@ export function Knob({ value, min, max, step = 0.01, size = 56, label, onChange 
         aria-valuemin={min}
         aria-valuemax={max}
         aria-valuenow={value}
-        tabIndex={0}
-        style={{ cursor: 'ns-resize', outline: active ? '1px solid var(--accent)' : 'none', borderRadius: 8 }}
+        tabIndex={disabled ? -1 : 0}
+        style={{ cursor: disabled ? 'default' : 'ns-resize', outline: active ? '1px solid var(--accent)' : 'none', borderRadius: 8 }}
       >
         <circle cx={cx} cy={cy} r={r} fill="#0f1217" stroke="#2a3040" />
         <circle cx={cx} cy={cy} r={r - 8} fill="#161a22" stroke="#202635" />

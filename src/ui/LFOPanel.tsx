@@ -1,6 +1,6 @@
 import React from 'react'
 import { useStore, type State } from '../state/store'
-import { Slider } from './controls/Slider'
+import { Knob } from './controls/Knob'
 
 function LfoRow({ idx }: { idx: 1 | 2 }) {
   const patch = useStore((s: State) => s.patch)
@@ -31,8 +31,8 @@ function LfoRow({ idx }: { idx: 1 | 2 }) {
           <option value="amp">Amp</option>
         </select>
       </label>
-      <Slider label="Rate (Hz)" min={0.01} max={20} step={0.01} value={lfo.rateHz} onChange={(v) => update({ [key]: { ...lfo, rateHz: v } } as any)} disabled={!lfo.enabled} />
-      <Slider label="Amount" min={0} max={1} step={0.01} value={lfo.amount} onChange={(v) => update({ [key]: { ...lfo, amount: v } } as any)} disabled={!lfo.enabled} />
+      <Knob label="Rate (Hz)" min={0.01} max={20} step={0.01} value={lfo.rateHz} onChange={(v) => update({ [key]: { ...lfo, rateHz: v } } as any)} disabled={!lfo.enabled} />
+      <Knob label="Amount" min={0} max={1} step={0.01} value={lfo.amount} onChange={(v) => update({ [key]: { ...lfo, amount: v } } as any)} disabled={!lfo.enabled} />
     </div>
   )
 }
