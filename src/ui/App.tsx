@@ -17,6 +17,8 @@ import { ExpressionPanel } from './ExpressionPanel'
 import { SettingsModal } from './SettingsModal'
 import { DrumMachinePanel } from './DrumMachinePanel'
 import { TransportTicker } from './TransportTicker'
+import { MidiManager } from './MidiManager'
+import { MidiSettings } from './MidiSettings'
 
 export function App() {
   const engine = useStore((s: State) => s.engine)
@@ -77,6 +79,7 @@ export function App() {
 
   return (
     <div className="app">
+      <MidiManager />
       <header className="header">
         <h2>WebSynth Studio</h2>
         <div className="row">
@@ -96,6 +99,10 @@ export function App() {
         <section className="settings-section">
           <h4 className="settings-heading">Expression</h4>
           <ExpressionPanel />
+        </section>
+        <section className="settings-section">
+          <h4 className="settings-heading">MIDI</h4>
+          <MidiSettings />
         </section>
       </SettingsModal>
       <TransportTicker />

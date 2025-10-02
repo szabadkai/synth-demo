@@ -2,6 +2,14 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { SynthEngine, Patch, defaultPatch } from '../audio-engine/engine'
 
+export type MidiDeviceInfo = {
+  id: string
+  name: string
+  manufacturer?: string | null
+}
+
+export type MidiStatus = 'idle' | 'requesting' | 'ready' | 'error' | 'unsupported'
+
 export type State = {
   engine: SynthEngine | null
   patch: Patch
@@ -10,6 +18,15 @@ export type State = {
     tempo: number
     playing: boolean
     tick: number
+  }
+  midi: {
+    supported: boolean | null
+    status: MidiStatus
+    enabled: boolean
+    inputs: MidiDeviceInfo[]
+    selectedInputId: string | null
+    lastError: string | null
+    activeNotes: number[]
   }
   setEngine: (e: SynthEngine) => void
   updatePatch: (p: Partial<Patch>) => void
@@ -20,6 +37,12 @@ export type State = {
   bumpTransportTick: () => void
   importPatch: (json: string) => void
   exportPatch: () => string
+  setMidiSupported: (supported: boolean) => void
+  setMidiStatus: (status: MidiStatus, error?: string | null) => void
+  setMidiEnabled: (enabled: boolean) => void
+  setMidiInputs: (inputs: MidiDeviceInfo[]) => void
+  setMidiSelectedInput: (id: string | null) => void
+  setMidiActiveNotes: (notes: number[]) => void
 }
 
 export const useStore = create<State>()(
@@ -30,6 +53,15 @@ export const useStore = create<State>()(
       layoutOrder: [],
       tempo: 110,
       transport: { tempo: 110, playing: false, tick: 0 },
+      midi: {
+        supported: null,
+        status: 'idle',
+        enabled: false,
+        inputs: [],
+        selectedInputId: null,
+        lastError: null,
+        activeNotes: [],
+      },
       setEngine: (e) => set({ engine: e }),
       updatePatch: (p) => {
         const next = {
@@ -86,6 +118,12 @@ export const useStore = create<State>()(
         set({ patch: merged })
       },
       exportPatch: () => JSON.stringify(get().patch, null, 2),
+      setMidiSupported: (supported) => set((state) => ({ midi: { ...state.midi, supported } })),
+      setMidiStatus: (status, error = null) => set((state) => ({ midi: { ...state.midi, status, lastError: error } })),
+      setMidiEnabled: (enabled) => set((state) => ({ midi: { ...state.midi, enabled } })),
+      setMidiInputs: (inputs) => set((state) => ({ midi: { ...state.midi, inputs } })),
+      setMidiSelectedInput: (id) => set((state) => ({ midi: { ...state.midi, selectedInputId: id } })),
+      setMidiActiveNotes: (notes) => set((state) => ({ midi: { ...state.midi, activeNotes: notes } })),
     }),
     {
       name: 'websynth-patch',
@@ -98,8 +136,12 @@ export const useStore = create<State>()(
         layoutOrder: state.layoutOrder,
         tempo: state.tempo,
         transport: { tempo: state.transport.tempo, playing: false, tick: 0 },
+        midi: {
+          enabled: state.midi.enabled,
+          selectedInputId: state.midi.selectedInputId,
+        },
       }),
-      version: 7,
+      version: 8,
       migrate: (persistedState: any, version: number) => {
         // Ensure new fields (osc2, mix) exist by merging with defaults
         const p = persistedState?.patch
@@ -132,7 +174,24 @@ export const useStore = create<State>()(
         const migratedTransport = transport
           ? { tempo: transport.tempo ?? tempo, playing: false, tick: 0 }
           : { tempo, playing: false, tick: 0 }
-        return { ...persistedState, patch: migratedPatch, layoutOrder, tempo, transport: migratedTransport }
+        const midi = persistedState?.midi
+        const migratedMidi = {
+          supported: null,
+          status: 'idle' as MidiStatus,
+          enabled: midi?.enabled ?? false,
+          inputs: [] as MidiDeviceInfo[],
+          selectedInputId: midi?.selectedInputId ?? null,
+          lastError: null as string | null,
+          activeNotes: [] as number[],
+        }
+        return {
+          ...persistedState,
+          patch: migratedPatch,
+          layoutOrder,
+          tempo,
+          transport: migratedTransport,
+          midi: migratedMidi,
+        }
       },
       onRehydrateStorage: () => (state) => {
         // Ensure engine is not restored from storage
@@ -141,6 +200,27 @@ export const useStore = create<State>()(
         if (!Array.isArray(state.layoutOrder)) state.layoutOrder = []
         if (typeof state.tempo !== 'number') state.tempo = 110
         if (!state.transport) state.transport = { tempo: state.tempo, playing: false, tick: 0 }
+        if (!state.midi) {
+          state.midi = {
+            supported: null,
+            status: 'idle',
+            enabled: false,
+            inputs: [],
+            selectedInputId: null,
+            lastError: null,
+            activeNotes: [],
+          }
+        } else {
+          state.midi = {
+            supported: null,
+            status: 'idle',
+            enabled: !!state.midi.enabled,
+            inputs: [],
+            selectedInputId: state.midi.selectedInputId ?? null,
+            lastError: null,
+            activeNotes: [],
+          }
+        }
       },
     }
   )

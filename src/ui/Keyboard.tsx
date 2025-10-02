@@ -37,18 +37,27 @@ const OFFSET_TO_LABEL: Record<number, string> = Object.fromEntries(
 
 export function Keyboard() {
   const engine = useStore((s: State) => s.engine)
-  const [active, setActive] = useState<Set<number>>(() => new Set())
+  const midiActive = useStore((s: State) => s.midi.activeNotes)
+  const [activeLocal, setActiveLocal] = useState<Set<number>>(() => new Set())
   const [baseMidi, setBaseMidi] = useState(60) // C4 by default
   // Track active pointers -> midi for multi-touch + gliss
   const pointerToMidi = useRef<Map<number, number>>(new Map())
 
+  const active = useMemo(() => {
+    const next = new Set(activeLocal)
+    for (const note of midiActive) {
+      next.add(note)
+    }
+    return next
+  }, [activeLocal, midiActive])
+
   const noteOn = (midi: number) => {
     engine?.noteOn(midi)
-    setActive((prev: Set<number>) => new Set(prev).add(midi))
+    setActiveLocal((prev: Set<number>) => new Set(prev).add(midi))
   }
   const noteOff = (midi: number) => {
     engine?.noteOff(midi)
-    setActive((prev: Set<number>) => {
+    setActiveLocal((prev: Set<number>) => {
       const next = new Set(prev)
       next.delete(midi)
       return next

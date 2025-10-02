@@ -13,6 +13,7 @@ WebSynth Studio is a browser-based analogue-style synthesizer built with React, 
 - **Configurable XY expression**: engage CapsLock and glide on the trackpad to control any two parameters (filter cutoff, oscillator detune, FM amount, envelope times, macro sliders, LFO rate/depth, etc.).
 - **Patch workflow**: import/export JSON patches, curate presets under `src/patches/`, and persist the working sound via local storage.
 - **Responsive keyboard**: MIDI-like computer keyboard mapping, on-screen keys, pointer glissando, and octave shifts.
+- **Hardware MIDI input**: enable Web MIDI in settings, pick a controller, and play the synth from external gear.
 
 ## Getting Started
 
