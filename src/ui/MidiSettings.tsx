@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useCallback } from 'react'
 import { useStore } from '../state/store'
+import { requestMidiAccess } from './MidiManager'
 
 const STATUS_TEXT: Record<string, string> = {
   idle: 'Not connected',
@@ -13,6 +14,8 @@ export function MidiSettings() {
   const midi = useStore((s) => s.midi)
   const setMidiEnabled = useStore((s) => s.setMidiEnabled)
   const setMidiSelectedInput = useStore((s) => s.setMidiSelectedInput)
+  const setMidiStatus = useStore((s) => s.setMidiStatus)
+  const setMidiSupported = useStore((s) => s.setMidiSupported)
 
   const statusLabel = useMemo(() => {
     const base = STATUS_TEXT[midi.status] ?? 'Unknown'
@@ -27,6 +30,37 @@ export function MidiSettings() {
 
   const disabled = midi.supported === false
 
+  const handleEnabledChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const nextEnabled = event.target.checked
+      if (!nextEnabled) {
+        setMidiEnabled(false)
+        return
+      }
+
+      setMidiStatus('requesting')
+      setMidiEnabled(true)
+
+      requestMidiAccess()
+        .then(() => {
+          setMidiSupported(true)
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : 'Failed to access MIDI devices'
+          const notSupported = error instanceof Error && /not supported/i.test(error.message)
+          if (notSupported) {
+            setMidiSupported(false)
+            setMidiStatus('unsupported')
+            setMidiEnabled(false)
+            return
+          }
+          setMidiSupported(true)
+          setMidiStatus('error', message)
+        })
+    },
+    [setMidiEnabled, setMidiStatus, setMidiSupported],
+  )
+
   return (
     <div className="settings-card">
       <div className="settings-row">
@@ -37,7 +71,7 @@ export function MidiSettings() {
           id="midi-enabled"
           type="checkbox"
           checked={midi.enabled}
-          onChange={(event) => setMidiEnabled(event.target.checked)}
+          onChange={handleEnabledChange}
           disabled={disabled}
         />
       </div>

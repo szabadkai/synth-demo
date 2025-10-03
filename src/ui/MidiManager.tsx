@@ -12,6 +12,19 @@ function mapDevices(access: MIDIAccess): MidiDeviceInfo[] {
   }))
 }
 
+let pendingMidiAccess: Promise<MIDIAccess> | null = null
+
+export function requestMidiAccess(): Promise<MIDIAccess> {
+  if (pendingMidiAccess) return pendingMidiAccess
+  if (typeof navigator === 'undefined' || typeof navigator.requestMIDIAccess !== 'function') {
+    return Promise.reject(new Error('Web MIDI API is not supported in this environment'))
+  }
+  pendingMidiAccess = navigator.requestMIDIAccess({ sysex: false }).finally(() => {
+    pendingMidiAccess = null
+  })
+  return pendingMidiAccess
+}
+
 export function MidiManager() {
   const engine = useStore((s) => s.engine)
   const midi = useStore((s) => s.midi)
@@ -34,7 +47,10 @@ export function MidiManager() {
       }
       activeNotesRef.current.clear()
       setMidiActiveNotes([])
-      setMidiStatus('idle')
+      const nextStatus = midi.supported === false ? 'unsupported' : 'idle'
+      if (midi.status !== nextStatus) {
+        setMidiStatus(nextStatus)
+      }
       setMidiInputs([])
       if (accessRef.current) {
         accessRef.current.onstatechange = null
@@ -52,7 +68,7 @@ export function MidiManager() {
     setMidiSupported(true)
     setMidiStatus('requesting')
 
-    navigator.requestMIDIAccess({ sysex: false }).then((access) => {
+    requestMidiAccess().then((access) => {
       if (cancelled) return
       accessRef.current = access
 

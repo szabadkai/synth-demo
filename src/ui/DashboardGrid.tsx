@@ -26,9 +26,10 @@ export type DashboardGridProps = {
   panels: DashboardPanelConfig[]
   order: string[]
   onOrderChange: (ids: string[]) => void
+  onRequestHelp?: (id: string) => void
 }
 
-export function DashboardGrid({ panels, order, onOrderChange }: DashboardGridProps) {
+export function DashboardGrid({ panels, order, onOrderChange, onRequestHelp }: DashboardGridProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [hover, setHover] = useState<HoverMarker>(null)
   const [draggingToEnd, setDraggingToEnd] = useState(false)
@@ -117,6 +118,12 @@ export function DashboardGrid({ panels, order, onOrderChange }: DashboardGridPro
     setDraggingToEnd(false)
   }
 
+  const handleHelpClick = (id: string) => (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onRequestHelp?.(id)
+  }
+
   return (
     <div
       className={`dashboard-grid${draggingToEnd ? ' drop-end' : ''}`}
@@ -151,15 +158,27 @@ export function DashboardGrid({ panels, order, onOrderChange }: DashboardGridPro
             <div className="panel-body">
               <div className="panel-header">
                 <h3 className="panel-title">{panel.title}</h3>
-                <span
-                  className="panel-drag-hint"
-                  aria-hidden="true"
-                  draggable
-                  onDragStart={handleDragStart(panel.id)}
-                  onDragEnd={handleDragEnd}
-                >
-                  ⋮⋮
-                </span>
+                <div className="panel-actions">
+                  {onRequestHelp ? (
+                    <button
+                      type="button"
+                      className="panel-help-button"
+                      onClick={handleHelpClick(panel.id)}
+                      aria-label={`Show help for ${panel.title}`}
+                    >
+                      ?
+                    </button>
+                  ) : null}
+                  <span
+                    className="panel-drag-hint"
+                    aria-hidden="true"
+                    draggable
+                    onDragStart={handleDragStart(panel.id)}
+                    onDragEnd={handleDragEnd}
+                  >
+                    ⋮⋮
+                  </span>
+                </div>
               </div>
               {panel.render()}
             </div>
