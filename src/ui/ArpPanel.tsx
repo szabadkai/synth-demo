@@ -1,6 +1,7 @@
 import React from 'react'
 import { useStore, type State } from '../state/store'
 import { defaultPatch } from '../audio-engine/engine'
+import type { Patch } from '../audio-engine/engine'
 import { Slider } from './controls/Slider'
 
 export function ArpPanel() {
@@ -75,6 +76,23 @@ export function ArpPanel() {
           <option value={2}>2</option>
           <option value={3}>3</option>
           <option value={4}>4</option>
+        </select>
+      </label>
+      <label>
+        <div className="label">Chord</div>
+        <select
+          value={arp.chord ?? 'none'}
+          onChange={(e) => update({ arp: { ...arp, chord: e.target.value as NonNullable<Patch['arp']>['chord'] } })}
+          disabled={!arp.enabled}
+        >
+          <option value="none">Single</option>
+          <option value="power">Power (5th)</option>
+          <option value="major">Major Triad</option>
+          <option value="minor">Minor Triad</option>
+          <option value="sus2">Sus2</option>
+          <option value="sus4">Sus4</option>
+          <option value="maj7">Major 7th</option>
+          <option value="min7">Minor 7th</option>
         </select>
       </label>
       <label>

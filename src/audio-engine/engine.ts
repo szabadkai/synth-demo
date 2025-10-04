@@ -48,6 +48,7 @@ export type Patch = {
     gate: number
     mode: 'up' | 'down' | 'updown' | 'random' | 'asplayed'
     octaves: number
+    chord?: 'none' | 'power' | 'major' | 'minor' | 'sus2' | 'sus4' | 'maj7' | 'min7'
     latch: boolean
     swingPct?: number // 0..1, 0 = straight, 1 = extreme swing
     repeats?: number // 1..4
@@ -88,7 +89,7 @@ export const defaultPatch: Patch = {
   },
   lfo1: { enabled: false, wave: 'sine', rateHz: 5, amount: 0.2, dest: 'pitch' },
   lfo2: { enabled: false, wave: 'triangle', rateHz: 0.5, amount: 0.4, dest: 'filter' },
-  arp: { enabled: false, rateHz: 8, bpmSync: false, bpm: 120, division: '1/8', gate: 0.6, mode: 'up', octaves: 1, latch: false, swingPct: 0, repeats: 1, patternLen: 0 },
+  arp: { enabled: false, rateHz: 8, bpmSync: false, bpm: 120, division: '1/8', gate: 0.6, mode: 'up', octaves: 1, chord: 'none', latch: false, swingPct: 0, repeats: 1, patternLen: 0 },
   sequencer: {
     enabled: false,
     playing: false,
@@ -444,7 +445,7 @@ export class SynthEngine {
     }
 
     // Reconfigure arpeggiator/sequencer only when those sections changed
-    if (p.arp !== undefined) this.updateArpScheduler()
+    if (p.arp !== undefined) this.updateArpScheduler({ forceRestart: true })
     if (p.sequencer !== undefined) this.updateSeqScheduler()
 
     // Live-detune updates for currently playing voices
@@ -1237,14 +1238,36 @@ export class SynthEngine {
   }
 
   // --- Arpeggiator helpers ---
+  private getArpChordOffsets() {
+    const chord = this.patch.arp?.chord ?? defaultPatch.arp!.chord ?? 'none'
+    switch (chord) {
+      case 'power': return [0, 7]
+      case 'major': return [0, 4, 7]
+      case 'minor': return [0, 3, 7]
+      case 'sus2': return [0, 2, 7]
+      case 'sus4': return [0, 5, 7]
+      case 'maj7': return [0, 4, 7, 11]
+      case 'min7': return [0, 3, 7, 10]
+      default: return [0]
+    }
+  }
+
   private buildArpPool(): number[] {
     if (this.arpHeld.size === 0) return []
     const mode = this.patch.arp?.mode ?? 'up'
     const base = mode === 'asplayed' ? Array.from(this.arpHeld.values()) : Array.from(this.arpHeld.values()).sort((a, b) => a - b)
     const oct = Math.max(1, Math.min(4, this.patch.arp?.octaves ?? 1))
     const pool: number[] = []
+    const chordOffsets = this.getArpChordOffsets()
     for (let o = 0; o < oct; o++) {
-      for (const n of base) pool.push(n + o * 12)
+      for (const n of base) {
+        const root = n + o * 12
+        for (const offset of chordOffsets) {
+          const midi = root + offset
+          if (midi < 0 || midi > 127) continue
+          pool.push(midi)
+        }
+      }
     }
     if (mode === 'down') return pool.slice().sort((a, b) => b - a)
     if (mode === 'random') return pool.slice().sort(() => Math.random() - 0.5)
@@ -1256,13 +1279,22 @@ export class SynthEngine {
     return pool
   }
 
-  private updateArpScheduler() {
+  private updateArpScheduler(options: { forceRestart?: boolean } = {}) {
+    const { forceRestart = false } = options
     const enabled = !!this.patch.arp?.enabled
     if (enabled && this.arpHeld.size > 0) {
-      if (this.arpTimer != null) { clearTimeout(this.arpTimer); this.arpTimer = null }
-      this.arpPhase = 0
-      this.arpRepeatCounter = 0
-      this.scheduleNextArpTick()
+      const shouldRestart = forceRestart || this.arpTimer == null
+      if (shouldRestart && this.arpTimer != null) {
+        clearTimeout(this.arpTimer)
+        this.arpTimer = null
+      }
+      if (shouldRestart) {
+        this.arpPhase = 0
+        this.arpRepeatCounter = 0
+        const baseStep = this.getArpStepMs()
+        const alignedDelay = this.computeArpAlignmentDelay(baseStep)
+        this.scheduleNextArpTick(alignedDelay)
+      }
     } else {
       if (this.arpTimer != null) { clearTimeout(this.arpTimer); this.arpTimer = null }
       // stop any lingering gated note
@@ -1277,7 +1309,16 @@ export class SynthEngine {
     }
   }
 
-  private scheduleNextArpTick() {
+  private computeArpAlignmentDelay(stepMs: number) {
+    if (!(stepMs > 0)) return 0
+    const nowMs = this.ctx.currentTime * 1000
+    const remainder = nowMs % stepMs
+    const epsilon = 1 // allow tiny timing drift without delaying a full step
+    if (remainder < epsilon) return 0
+    return stepMs - remainder
+  }
+
+  private scheduleNextArpTick(initialDelay?: number) {
     const base = this.getArpStepMs()
     // Swing only in BPM sync; scale by division (less swing for 1/16, none for triplets/quarters)
     let swing = 0
@@ -1290,15 +1331,16 @@ export class SynthEngine {
     }
     // on-beat longer, off-beat shorter (classic swing)
     const factor = this.arpPhase === 0 ? 1 + swing * 0.5 : 1 - swing * 0.5
-    const delay = base * factor
-    this.arpCurrentStepMs = delay
+    const stepMs = base * factor
+    const delay = initialDelay ?? stepMs
+    this.arpCurrentStepMs = stepMs
     this.arpTimer = (setTimeout(() => {
       // If arp disabled mid-wait, abort
       if (!this.patch.arp?.enabled || this.arpHeld.size === 0) { this.updateArpScheduler(); return }
       this.arpTick()
       this.arpPhase = this.arpPhase ? 0 : 1
       this.scheduleNextArpTick()
-    }, delay) as unknown) as number
+    }, Math.max(0, delay)) as unknown) as number
   }
 
   private getArpStepMs() {

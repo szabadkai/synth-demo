@@ -227,6 +227,7 @@ export function App() {
           <ul>
             <li><strong>Mode</strong>: set traversal (up, down, up/down, random, as played).</li>
             <li><strong>Octaves</strong>: extend the pattern across 1–4 octaves.</li>
+            <li><strong>Chord</strong>: fold power chords, triads, or sevenths into each step.</li>
             <li><strong>Division</strong>: choose rhythmic value (1/4–1/16T).</li>
             <li><strong>BPM</strong>: the slider writes to the global tempo so drums and sequencer stay in sync.</li>
             <li><strong>Gate/Swing</strong>: tighten note length and groove feel.</li>
