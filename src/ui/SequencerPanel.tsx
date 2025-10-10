@@ -1,15 +1,7 @@
 import React from 'react'
 import { useStore, type State } from '../state/store'
 import { defaultPatch } from '../audio-engine/engine'
-import { Slider } from './controls/Slider'
-
-function midiToName(m: number) {
-  const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-  const n = Math.round(m)
-  const name = names[n % 12]
-  const oct = Math.floor(n / 12) - 1
-  return `${name}${oct}`
-}
+import { Knob } from './controls/Knob'
 
 export function SequencerPanel() {
   const patch = useStore((s: State) => s.patch)
@@ -100,23 +92,6 @@ export function SequencerPanel() {
           <input type="checkbox" checked={seq.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
           <span>Enabled</span>
         </label>
-        <label className="tempo-control">
-          <span>Tempo</span>
-          <input
-            type="range"
-            min={40}
-            max={240}
-            step={1}
-            value={tempo}
-            onChange={(e) => {
-              const value = Number(e.target.value)
-              setTempoGlobal(value)
-              set({ bpm: value })
-            }}
-            disabled={!seq.enabled}
-          />
-          <span className="tempo-value">{Math.round(tempo)} BPM</span>
-        </label>
         <label className="sequence-toggle">
           <span>Division</span>
           <select value={seq.division} onChange={(e) => set({ division: e.target.value as any })} disabled={!seq.enabled}>
@@ -129,7 +104,7 @@ export function SequencerPanel() {
         </label>
       </div>
       <div className="sequence-body">
-        <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
           <label>
             <div className="label">Length</div>
             <select value={seq.length} onChange={(e) => set({ length: Number(e.target.value) })} disabled={!seq.enabled}>
@@ -138,12 +113,21 @@ export function SequencerPanel() {
               ))}
             </select>
           </label>
-          <Slider label="Gate" min={0.05} max={1} step={0.01} value={seq.gate} onChange={(v) => set({ gate: v })} disabled={!seq.enabled} format={(v) => `${Math.round(v * 100)}%`} />
-          <Slider label="Swing" min={0} max={0.75} step={0.01} value={seq.swingPct ?? 0} onChange={(v) => set({ swingPct: v })} disabled={!seq.enabled || seq.division.endsWith('T') || seq.division === '1/4'} format={(v) => `${Math.round(v * 100)}%`} />
-          <div className="sequence-root">
-            <span className="label">Root</span>
-            <Slider label={undefined} min={36} max={84} step={1} value={seq.rootMidi} onChange={(v) => set({ rootMidi: v })} disabled={!seq.enabled} format={(v) => midiToName(v)} />
-          </div>
+          <Knob
+            label="Tempo"
+            min={40}
+            max={240}
+            step={1}
+            value={tempo}
+            onChange={(value) => {
+              setTempoGlobal(value)
+              set({ bpm: value })
+            }}
+            disabled={!seq.enabled}
+          />
+          <Knob label="Gate" min={0.05} max={1} step={0.01} value={seq.gate} onChange={(v) => set({ gate: v })} disabled={!seq.enabled} />
+          <Knob label="Swing" min={0} max={0.75} step={0.01} value={seq.swingPct ?? 0} onChange={(v) => set({ swingPct: v })} disabled={!seq.enabled || seq.division.endsWith('T') || seq.division === '1/4'} />
+          <Knob label="Root" min={36} max={84} step={1} value={seq.rootMidi} onChange={(v) => set({ rootMidi: v })} disabled={!seq.enabled} />
           <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, alignItems: 'center' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input type="checkbox" checked={kbEdit} onChange={(e) => setKbEdit(e.target.checked)} />

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { SynthEngine, defaultPatch, type Patch } from '../audio-engine/engine'
 import { useStore, type State } from '../state/store'
+import { Knob } from './controls/Knob'
 
 const STEPS = 16
 
@@ -129,18 +130,14 @@ export function DrumMachinePanel() {
     <div className="drum-machine">
       <div className="drum-controls">
         <button className="play-button" onClick={() => setPlayingGlobal(!playing)}>{playing ? 'Stop' : 'Play'}</button>
-        <label className="tempo-control">
-          <span>Tempo</span>
-          <input
-            type="range"
-            min={60}
-            max={180}
-            step={1}
-            value={tempo}
-            onChange={(e) => setTempoGlobal(Number(e.target.value))}
-          />
-          <span className="tempo-value">{tempo} BPM</span>
-        </label>
+        <Knob
+          label="Tempo"
+          min={60}
+          max={180}
+          step={1}
+          value={tempo}
+          onChange={(value) => setTempoGlobal(value)}
+        />
       </div>
       <div className="drum-grid">
         {INSTRUMENTS.map((inst) => (

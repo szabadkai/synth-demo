@@ -2,7 +2,6 @@ import React from 'react'
 import { useStore, type State } from '../state/store'
 import { defaultPatch } from '../audio-engine/engine'
 import type { Patch } from '../audio-engine/engine'
-import { Slider } from './controls/Slider'
 import { Knob } from './controls/Knob'
 
 export function ArpPanel() {
@@ -132,7 +131,7 @@ export function ArpPanel() {
           <option value="1/16T">1/16T</option>
         </select>
       </label>
-      <Slider
+      <Knob
         label="BPM"
         min={40}
         max={240}
@@ -143,7 +142,6 @@ export function ArpPanel() {
           setArp({ bpm: v, bpmSync: true })
         }}
         disabled={!arp.enabled}
-        format={(v) => `${Math.round(v)}`}
       />
 
       {/* Row 3: gate across */}

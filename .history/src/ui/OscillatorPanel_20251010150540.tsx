@@ -188,7 +188,7 @@ export function OscillatorPanel() {
       <div
         style={{
           gridColumn: '1 / -1',
-          display: 'flex',
+          display: 'grid',
           gridTemplateColumns: 'auto auto',
           justifyItems: 'start',
           gap: 16,
