@@ -46,6 +46,7 @@ export type Patch = {
     division: '1/4' | '1/8' | '1/8T' | '1/16' | '1/16T'
     // Playback
     gate: number
+    chordSource?: 'preset' | 'sequencer'
     mode: 'up' | 'down' | 'updown' | 'random' | 'asplayed'
     octaves: number
     chord?: 'none' | 'power' | 'major' | 'minor' | 'sus2' | 'sus4' | 'maj7' | 'min7'
@@ -89,7 +90,7 @@ export const defaultPatch: Patch = {
   },
   lfo1: { enabled: false, wave: 'sine', rateHz: 5, amount: 0.2, dest: 'pitch' },
   lfo2: { enabled: false, wave: 'triangle', rateHz: 0.5, amount: 0.4, dest: 'filter' },
-  arp: { enabled: false, rateHz: 8, bpmSync: false, bpm: 120, division: '1/8', gate: 0.6, mode: 'up', octaves: 1, chord: 'none', latch: false, swingPct: 0, repeats: 1, patternLen: 0 },
+  arp: { enabled: false, rateHz: 8, bpmSync: false, bpm: 120, division: '1/8', gate: 0.6, chordSource: 'preset', mode: 'up', octaves: 1, chord: 'none', latch: false, swingPct: 0, repeats: 1, patternLen: 0 },
   sequencer: {
     enabled: false,
     playing: false,
@@ -1239,7 +1240,27 @@ export class SynthEngine {
 
   // --- Arpeggiator helpers ---
   private getArpChordOffsets() {
-    const chord = this.patch.arp?.chord ?? defaultPatch.arp!.chord ?? 'none'
+    const arp = this.patch.arp ?? defaultPatch.arp!
+    const source = arp.chordSource ?? 'preset'
+    if (source === 'sequencer') {
+      const seq = this.patch.sequencer ?? defaultPatch.sequencer!
+      const steps = seq.steps ?? []
+      const length = Math.max(1, Math.min(steps.length, seq.length))
+      const offsets = new Set<number>()
+      for (let i = 0; i < length; i++) {
+        const step = steps[i]
+        if (step?.on) {
+          const semis = Math.round(step.offset ?? 0)
+          if (Number.isFinite(semis)) offsets.add(semis)
+        }
+      }
+      if (offsets.size > 0) {
+        return Array.from(offsets).sort((a, b) => a - b)
+      }
+      // Fall back to at least the pressed note if the sequence has no active steps
+      return [0]
+    }
+    const chord = arp.chord ?? defaultPatch.arp!.chord ?? 'none'
     switch (chord) {
       case 'power': return [0, 7]
       case 'major': return [0, 4, 7]

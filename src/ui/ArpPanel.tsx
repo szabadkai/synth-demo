@@ -3,6 +3,7 @@ import { useStore, type State } from '../state/store'
 import { defaultPatch } from '../audio-engine/engine'
 import type { Patch } from '../audio-engine/engine'
 import { Slider } from './controls/Slider'
+import { Knob } from './controls/Knob'
 
 export function ArpPanel() {
   const patch = useStore((s: State) => s.patch)
@@ -11,11 +12,24 @@ export function ArpPanel() {
   const tempo = useStore((s: State) => s.transport.tempo)
   const setTempo = useStore((s: State) => s.setTempo)
   const arp = (patch.arp ?? defaultPatch.arp)!
+  const seq = (patch.sequencer ?? defaultPatch.sequencer)!
   const [status, setStatus] = React.useState<{ enabled: boolean; stepIndex: number; length: number }>({ enabled: false, stepIndex: 0, length: 0 })
 
   const setArp = (changes: Partial<typeof arp>) => {
     update({ arp: { ...arp, ...changes } })
   }
+
+  const chordSource = arp.chordSource ?? 'preset'
+  const sequencerChordCount = React.useMemo(() => {
+    const steps = seq.steps ?? []
+    const length = Math.max(1, Math.min(steps.length, seq.length))
+    const offsets = new Set<number>()
+    for (let i = 0; i < length; i++) {
+      const step = steps[i]
+      if (step?.on) offsets.add(Math.round(step.offset ?? 0))
+    }
+    return offsets.size
+  }, [seq])
 
   React.useEffect(() => {
     if (!engine) return
@@ -81,8 +95,15 @@ export function ArpPanel() {
       <label>
         <div className="label">Chord</div>
         <select
-          value={arp.chord ?? 'none'}
-          onChange={(e) => update({ arp: { ...arp, chord: e.target.value as NonNullable<Patch['arp']>['chord'] } })}
+          value={chordSource === 'sequencer' ? 'sequencer' : (arp.chord ?? 'none')}
+          onChange={(e) => {
+            const value = e.target.value as string
+            if (value === 'sequencer') {
+              setArp({ chordSource: 'sequencer' })
+            } else {
+              setArp({ chordSource: 'preset', chord: value as NonNullable<Patch['arp']>['chord'] })
+            }
+          }}
           disabled={!arp.enabled}
         >
           <option value="none">Single</option>
@@ -93,8 +114,14 @@ export function ArpPanel() {
           <option value="sus4">Sus4</option>
           <option value="maj7">Major 7th</option>
           <option value="min7">Minor 7th</option>
+          <option value="sequencer">Sequencer Pattern</option>
         </select>
       </label>
+      {chordSource === 'sequencer' && (
+        <div className="hint-text" style={{ gridColumn: 'span 2', fontSize: 12, opacity: 0.8, alignSelf: 'end' }}>
+          Sequencer pattern{sequencerChordCount > 0 ? ` • ${sequencerChordCount} interval${sequencerChordCount === 1 ? '' : 's'}` : ' • no active steps yet'}
+        </div>
+      )}
       <label>
         <div className="label">Division</div>
         <select value={arp.division} onChange={(e) => setArp({ division: e.target.value as any })} disabled={!arp.enabled}>
@@ -120,13 +147,13 @@ export function ArpPanel() {
       />
 
       {/* Row 3: gate across */}
-      <div style={{ gridColumn: '1 / -1' }}>
-        <Slider label="Gate" min={0.05} max={1} step={0.01} value={arp.gate} onChange={(v) => update({ arp: { ...arp, gate: v } })} disabled={!arp.enabled} format={(v) => `${Math.round(v * 100)}%`} />
+      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 32, alignItems: 'center', justifyContent: 'flex-start', padding: '6px 0' }}>
+        <Knob label="Gate" min={0.05} max={1} step={0.01} value={arp.gate} onChange={(v) => update({ arp: { ...arp, gate: v } })} disabled={!arp.enabled} />
+        <Knob label="Swing" min={0} max={0.75} step={0.01} value={arp.swingPct ?? 0} onChange={(v) => update({ arp: { ...arp, swingPct: v } })} disabled={!arp.enabled || !(arp.bpmSync)} />
       </div>
 
-      {/* Row 4: swing + repeats + pattern length */}
-      <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-        <Slider label="Swing" min={0} max={0.75} step={0.01} value={arp.swingPct ?? 0} onChange={(v) => update({ arp: { ...arp, swingPct: v } })} disabled={!arp.enabled || !(arp.bpmSync)} format={(v) => `${Math.round(v * 100)}%`} />
+      {/* Row 4: repeats + pattern length */}
+      <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <label>
           <div className="label">Repeats</div>
           <select value={arp.repeats ?? 1} onChange={(e) => update({ arp: { ...arp, repeats: Number(e.target.value) } })} disabled={!arp.enabled}>
