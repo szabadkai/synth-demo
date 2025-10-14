@@ -1,6 +1,6 @@
 import type { ExpressionTarget } from './expressionTargets'
 
-export type WaveType = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'noise'
+export type WaveType = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'noise' | 'sample'
 
 export type ADSR = {
   attack: number
@@ -11,16 +11,29 @@ export type ADSR = {
 
 export type MacroModel = 'va' | 'fold' | 'pluck' | 'supersaw' | 'pwm' | 'fm2op' | 'wavetable' | 'harmonic' | 'chord'
 
+export type SamplerSettings = {
+  id: string | null
+  name: string
+  dataUrl: string | null
+  rootMidi: number
+  loop: boolean
+  recordedAt?: number
+  durationSec?: number
+  trimStartSec?: number
+  trimEndSec?: number
+}
+
 export type Patch = {
   osc1: { wave: WaveType; detune: number; finePct?: number }
   osc2: { wave: WaveType; detune: number }
   mix: number // 0 = osc1 only, 1 = osc2 only
   fm: { enabled: boolean; ratio: number; amount: number } // amount in Hz added to carrier freq
-  sub: { enabled: boolean; octave: 1 | 2; level: number; wave?: Exclude<WaveType, 'noise'> }
+  sub: { enabled: boolean; octave: 1 | 2; level: number; wave?: Exclude<WaveType, 'noise' | 'sample'> }
   ring: { enabled: boolean; amount: number } // amount 0..1 crossfade between normal and ring product
   filter: { type: BiquadFilterType; cutoff: number; q: number }
   envelope: ADSR
   master: { gain: number }
+  sampler: SamplerSettings
   // Macro (Plaits-like) engine
   engineMode?: 'classic' | 'macro'
   macro?: {
@@ -34,8 +47,8 @@ export type Patch = {
     delay: { enabled: boolean; time: number; feedback: number; mix: number }
     reverb: { enabled: boolean; size: number; decay: number; mix: number }
   }
-  lfo1?: { enabled: boolean; wave: Exclude<WaveType, 'noise'>; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
-  lfo2?: { enabled: boolean; wave: Exclude<WaveType, 'noise'>; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
+  lfo1?: { enabled: boolean; wave: Exclude<WaveType, 'noise' | 'sample'>; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
+  lfo2?: { enabled: boolean; wave: Exclude<WaveType, 'noise' | 'sample'>; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
   arp?: {
     enabled: boolean
     // Free-rate mode
@@ -82,6 +95,16 @@ export const defaultPatch: Patch = {
   filter: { type: 'lowpass', cutoff: 1200, q: 0.8 },
   envelope: { attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3 },
   master: { gain: 0.2 },
+  sampler: {
+    id: null,
+    name: 'Empty',
+    dataUrl: null,
+    rootMidi: 60,
+    loop: true,
+    durationSec: 0,
+    trimStartSec: 0,
+    trimEndSec: 0,
+  },
   engineMode: 'classic',
   macro: { model: 'va', harmonics: 0.6, timbre: 0.5, morph: 0.5, level: 1.0 },
   effects: {
@@ -287,6 +310,9 @@ export class SynthEngine {
   }
   private expressionSnapshot: Record<ExpressionAxis, number | null> = { x: null, y: null }
   private expressionApplying = false
+  private samplerBuffer: AudioBuffer | null = null
+  private samplerMeta: SamplerSettings = { ...defaultPatch.sampler }
+  private samplerLoadToken = 0
   patch: Patch
 
   // Arpeggiator state
@@ -341,6 +367,7 @@ export class SynthEngine {
 
     this.patch = { ...defaultPatch }
     this.applyPatch()
+    this.samplerMeta = this.normalizeSamplerMeta(this.patch.sampler, null)
   }
 
   get audioContext() {
@@ -363,6 +390,100 @@ export class SynthEngine {
     if (this.ctx.state !== 'running') await this.ctx.resume()
   }
 
+  private normalizeSamplerMeta(meta: SamplerSettings, buffer: AudioBuffer | null): SamplerSettings {
+    const duration = buffer?.duration ?? (Number.isFinite(meta.durationSec) ? (meta.durationSec as number) : 0)
+    if (!(duration > 0)) {
+      return { ...meta, durationSec: 0, trimStartSec: 0, trimEndSec: 0 }
+    }
+    const epsilon = 0.005
+    const maxStart = Math.max(0, duration - epsilon)
+    const rawStart = Number(meta.trimStartSec)
+    const start = clampValue(Number.isFinite(rawStart) ? rawStart : 0, 0, maxStart)
+    const rawEnd = Number(meta.trimEndSec)
+    let end = Number.isFinite(rawEnd) ? rawEnd : duration
+    end = clampValue(end, start + epsilon, duration)
+    if (end - start < epsilon) {
+      end = Math.min(duration, start + epsilon)
+    }
+    return {
+      ...meta,
+      durationSec: duration,
+      trimStartSec: start,
+      trimEndSec: end,
+    }
+  }
+
+  private async updateSamplerBuffer(settings: SamplerSettings) {
+    const isSameSource = this.samplerMeta.id === settings.id && this.samplerMeta.dataUrl === settings.dataUrl
+    this.samplerMeta = this.normalizeSamplerMeta({ ...settings }, isSameSource ? this.samplerBuffer : null)
+    if (!settings.dataUrl) {
+      this.samplerBuffer = null
+      this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, null)
+      return
+    }
+    if (isSameSource && this.samplerBuffer) return
+    const token = ++this.samplerLoadToken
+    try {
+      const response = await fetch(settings.dataUrl)
+      const arrayBuffer = await response.arrayBuffer()
+      const decoded = await this.ctx.decodeAudioData(arrayBuffer.slice(0))
+      if (token === this.samplerLoadToken) {
+        this.samplerBuffer = decoded
+        this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, decoded)
+      }
+    } catch (error) {
+      if (token === this.samplerLoadToken) {
+        this.samplerBuffer = null
+        this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, null)
+      }
+      console.warn('Failed to decode sampler buffer', error)
+    }
+  }
+
+  private getSamplerBaseFrequency() {
+    const rootMidi = Number.isFinite(this.samplerMeta.rootMidi) ? this.samplerMeta.rootMidi : 60
+    return 440 * Math.pow(2, (rootMidi - 69) / 12)
+  }
+
+  private getDetuneCents(which: 'osc1' | 'osc2') {
+    if (which === 'osc1') {
+      const coarse = this.patch.osc1.detune || 0
+      const finePct = (this.patch.osc1.finePct ?? 0) / 100
+      const delta = Math.abs(coarse) * 0.05 * finePct
+      return coarse + delta
+    }
+    return this.patch.osc2.detune || 0
+  }
+
+  private createSamplerSource(freq: number, which: 'osc1' | 'osc2'): AudioBufferSourceNode | null {
+    if (!this.samplerBuffer) return null
+    this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, this.samplerBuffer)
+    const src = this.ctx.createBufferSource()
+    src.buffer = this.samplerBuffer
+    const start = this.samplerMeta.trimStartSec ?? 0
+    const end = this.samplerMeta.trimEndSec ?? this.samplerBuffer.duration
+    const maxWindow = Math.max(0.005, this.samplerBuffer.duration - start)
+    const playbackWindow = clampValue(end - start, 0.005, maxWindow)
+    const loopEnabled = !!this.samplerMeta.loop && playbackWindow > 0.01
+    src.loop = loopEnabled
+    if (loopEnabled) {
+      src.loopStart = start
+      src.loopEnd = start + playbackWindow
+    }
+    const baseFreq = this.getSamplerBaseFrequency()
+    const detuneCents = this.getDetuneCents(which)
+    const detuneRatio = Math.pow(2, detuneCents / 1200)
+    const ratio = baseFreq > 0 ? (freq / baseFreq) * detuneRatio : detuneRatio
+    src.playbackRate.setValueAtTime(ratio, this.ctx.currentTime)
+    if (loopEnabled) {
+      src.start(0, start)
+    } else {
+      src.start(0, start, playbackWindow)
+    }
+    ;(src as any)._autoStarted = true
+    return src
+  }
+
   applyPatch(p: DeepPartial<Patch> = {}, options: { fromExpression?: boolean } = {}) {
     const { fromExpression = false } = options
     const prev = this.patch
@@ -379,6 +500,7 @@ export class SynthEngine {
       master: { ...this.patch.master, ...(p.master ?? {}) },
       mix: p.mix != null ? p.mix : this.patch.mix,
       engineMode: p.engineMode ?? this.patch.engineMode ?? 'classic',
+      sampler: { ...(this.patch.sampler ?? defaultPatch.sampler), ...(p.sampler ?? {}) },
       macro: { ...(this.patch.macro ?? defaultPatch.macro!), ...(p.macro ?? {}) },
       effects: {
         ...(this.patch.effects ?? defaultPatch.effects!),
@@ -394,6 +516,9 @@ export class SynthEngine {
       expression: { ...(this.patch.expression ?? defaultPatch.expression!), ...(p.expression ?? {}) },
     }
     this.patch = next
+    if (p.sampler !== undefined) {
+      void this.updateSamplerBuffer(next.sampler)
+    }
 
     this.configureExpressionRouting(next.expression)
 
@@ -1072,19 +1197,22 @@ export class SynthEngine {
   sub2.connect(normalSum)
   normalSum.connect(oscGain)
 
-  const sources: Array<OscillatorNode | AudioBufferSourceNode> = []
+  const sources: AudioScheduledSourceNode[] = []
   let osc1Node: OscillatorNode | null = null
   let osc2Node: OscillatorNode | null = null
+  let primarySource: AudioNode | null = null
   const lfoParamConnections: Array<{ g: GainNode; p: AudioParam }> = []
 
     // Oscillator 1 (carrier)
     {
-      let s1: OscillatorNode | AudioBufferSourceNode
+      let s1: OscillatorNode | AudioBufferSourceNode | null = null
       if (this.patch.osc1.wave === 'noise') {
         const src = this.ctx.createBufferSource()
         src.buffer = this.noiseBuffer!
         src.loop = true
         s1 = src
+      } else if (this.patch.osc1.wave === 'sample') {
+        s1 = this.createSamplerSource(freq, 'osc1')
       } else {
         const osc = this.ctx.createOscillator()
         osc.type = this.patch.osc1.wave as OscillatorType
@@ -1096,12 +1224,16 @@ export class SynthEngine {
         osc.detune.value = effectiveDetune
         s1 = osc
         osc1Node = osc
-  }
-      s1.connect(sub1)
-      sources.push(s1)
+      }
+
+      if (s1) {
+        s1.connect(sub1)
+        sources.push(s1)
+        primarySource = s1
+      }
 
       // FM: use osc2 as modulator on carrier frequency (if carrier supports frequency param)
-      if (this.patch.fm.enabled && 'frequency' in (s1 as any)) {
+      if (s1 && this.patch.fm.enabled && 'frequency' in (s1 as any)) {
         const carrier = s1 as OscillatorNode
         const mod = this.ctx.createOscillator()
         mod.type = this.patch.osc2.wave as OscillatorType
@@ -1116,7 +1248,7 @@ export class SynthEngine {
       }
 
       // LFOs to pitch (detune in cents)
-      if ('detune' in (s1 as any)) {
+      if (s1 && 'detune' in (s1 as any)) {
         for (const l of this.lfos) {
           if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
             l.gain.connect((s1 as OscillatorNode).detune)
@@ -1128,12 +1260,14 @@ export class SynthEngine {
 
     // Oscillator 2
     {
-      let s2: OscillatorNode | AudioBufferSourceNode
+      let s2: OscillatorNode | AudioBufferSourceNode | null = null
       if (this.patch.osc2.wave === 'noise') {
         const src = this.ctx.createBufferSource()
         src.buffer = this.noiseBuffer!
         src.loop = true
         s2 = src
+      } else if (this.patch.osc2.wave === 'sample') {
+        s2 = this.createSamplerSource(freq, 'osc2')
       } else {
         const osc = this.ctx.createOscillator()
         osc.type = this.patch.osc2.wave as OscillatorType
@@ -1142,15 +1276,17 @@ export class SynthEngine {
         s2 = osc
         osc2Node = osc
       }
-  s2.connect(sub2)
-      sources.push(s2)
+
+      if (s2) {
+        s2.connect(sub2)
+        sources.push(s2)
+      }
 
       // Ring modulation: multiply s1 by s2 and crossfade with normal mix
-      if (this.patch.ring.enabled) {
+      if (this.patch.ring.enabled && primarySource && s2) {
         const ringVca = this.ctx.createGain()
         ringVca.gain.value = 0 // remove DC offset so gain comes purely from modulator
-        // connect carrier to VCA input
-        ;(sources[0] as AudioNode).connect(ringVca)
+        primarySource.connect(ringVca)
         // depth: modulator -> gain (audio-rate modulation)
         const depth = this.ctx.createGain()
         depth.gain.value = 1
@@ -1167,7 +1303,7 @@ export class SynthEngine {
       }
 
       // LFOs to pitch (detune) for osc2 if applicable
-      if ('detune' in (s2 as any)) {
+      if (s2 && 'detune' in (s2 as any)) {
         for (const l of this.lfos) {
           if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
             l.gain.connect((s2 as OscillatorNode).detune)
@@ -1185,7 +1321,7 @@ export class SynthEngine {
     g.linearRampToValueAtTime(env.sustain, now + env.attack + Math.max(0.001, env.decay))
 
     for (const s of sources) {
-      if ('start' in s) (s as any).start()
+      if ('start' in s && !(s as any)._autoStarted) (s as any).start()
     }
 
     // Sub oscillator: mixed into the same ADSR path

@@ -2,6 +2,7 @@ import React from 'react'
 import { useStore, type State } from '../state/store'
 import { Knob } from './controls/Knob'
 import { defaultPatch } from '../audio-engine/engine'
+import { SamplerControls } from './SamplerControls'
 
 export function OscillatorPanel() {
   const patch = useStore((s: State) => s.patch)
@@ -109,6 +110,7 @@ export function OscillatorPanel() {
           <option value="sawtooth">Saw</option>
           <option value="triangle">Triangle</option>
           <option value="noise">Noise</option>
+          <option value="sample">Sample</option>
         </select>
       </label>
       <label>
@@ -124,8 +126,15 @@ export function OscillatorPanel() {
           <option value="sawtooth">Saw</option>
           <option value="triangle">Triangle</option>
           <option value="noise">Noise</option>
+          <option value="sample">Sample</option>
         </select>
       </label>
+
+      {(patch.osc1.wave === 'sample' || patch.osc2.wave === 'sample') && (
+        <div style={{ gridColumn: '1 / -1' }}>
+          <SamplerControls />
+        </div>
+      )}
 
       {/* Osc 1 controls row */}
       <div className="osc-knob-row" style={{ gridColumn: '1 / 2' }}>

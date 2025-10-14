@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { SynthEngine, Patch, defaultPatch } from '../audio-engine/engine'
+import { SynthEngine, Patch, SamplerSettings, defaultPatch } from '../audio-engine/engine'
 
 export type MidiDeviceInfo = {
   id: string
@@ -13,6 +13,7 @@ export type MidiStatus = 'idle' | 'requesting' | 'ready' | 'error' | 'unsupporte
 export type State = {
   engine: SynthEngine | null
   patch: Patch
+  samplerLibrary: SamplerSettings[]
   layoutOrder: string[]
   transport: {
     tempo: number
@@ -43,6 +44,11 @@ export type State = {
   setMidiInputs: (inputs: MidiDeviceInfo[]) => void
   setMidiSelectedInput: (id: string | null) => void
   setMidiActiveNotes: (notes: number[]) => void
+  saveSamplerSample: (sample: SamplerSettings) => void
+  deleteSamplerSample: (id: string) => void
+  setSamplerFromLibrary: (id: string) => void
+  updateCurrentSampler: (changes: Partial<SamplerSettings>) => void
+  renameSamplerSample: (id: string, name: string) => void
 }
 
 export const useStore = create<State>()(
@@ -50,6 +56,7 @@ export const useStore = create<State>()(
     (set, get) => ({
       engine: null,
       patch: defaultPatch,
+      samplerLibrary: [],
       layoutOrder: [],
       tempo: 110,
       transport: { tempo: 110, playing: false, tick: 0 },
@@ -75,6 +82,7 @@ export const useStore = create<State>()(
           filter: { ...get().patch.filter, ...(p as any).filter },
           envelope: { ...get().patch.envelope, ...(p as any).envelope },
           master: { ...get().patch.master, ...(p as any).master },
+          sampler: { ...get().patch.sampler, ...(p as any).sampler },
           macro: { ...((get().patch as any).macro || defaultPatch.macro), ...(p as any).macro },
           effects: { ...((get().patch as any).effects || defaultPatch.effects), ...(p as any).effects },
           lfo1: { ...((get().patch as any).lfo1 || defaultPatch.lfo1), ...(p as any).lfo1 },
@@ -105,6 +113,7 @@ export const useStore = create<State>()(
           filter: { ...get().patch.filter, ...(obj as any).filter },
           envelope: { ...get().patch.envelope, ...(obj as any).envelope },
           master: { ...get().patch.master, ...(obj as any).master },
+          sampler: { ...get().patch.sampler, ...(obj as any).sampler },
           macro: { ...((get().patch as any).macro || defaultPatch.macro), ...(obj as any).macro },
           effects: { ...((get().patch as any).effects || defaultPatch.effects), ...(obj as any).effects },
           lfo1: { ...((get().patch as any).lfo1 || defaultPatch.lfo1), ...(obj as any).lfo1 },
@@ -124,6 +133,60 @@ export const useStore = create<State>()(
       setMidiInputs: (inputs) => set((state) => ({ midi: { ...state.midi, inputs } })),
       setMidiSelectedInput: (id) => set((state) => ({ midi: { ...state.midi, selectedInputId: id } })),
       setMidiActiveNotes: (notes) => set((state) => ({ midi: { ...state.midi, activeNotes: notes } })),
+      saveSamplerSample: (sample) => set((state) => {
+        const id = sample.id ?? `sample-${Date.now()}`
+        const sanitized: SamplerSettings = { ...defaultPatch.sampler, ...sample, id }
+        const nextLibrary = state.samplerLibrary.filter((s) => s.id !== id).concat(sanitized)
+        state.engine?.applyPatch({ sampler: sanitized })
+        return {
+          samplerLibrary: nextLibrary,
+          patch: { ...state.patch, sampler: sanitized },
+        }
+      }),
+      deleteSamplerSample: (id) => set((state) => {
+        const nextLibrary = state.samplerLibrary.filter((s) => s.id !== id)
+        let nextPatch = state.patch
+        if (state.patch.sampler.id === id) {
+          const fallback = { ...defaultPatch.sampler }
+          state.engine?.applyPatch({ sampler: fallback })
+          nextPatch = { ...state.patch, sampler: fallback }
+        }
+        return { samplerLibrary: nextLibrary, patch: nextPatch }
+      }),
+      setSamplerFromLibrary: (id) => set((state) => {
+        const found = state.samplerLibrary.find((s) => s.id === id)
+        if (!found) return {}
+        const sample = { ...defaultPatch.sampler, ...found }
+        state.engine?.applyPatch({ sampler: sample })
+        return { patch: { ...state.patch, sampler: sample } }
+      }),
+      updateCurrentSampler: (changes) => set((state) => {
+        const current = { ...defaultPatch.sampler, ...(state.patch.sampler ?? {}) }
+        const nextSampler = { ...current, ...changes }
+        state.engine?.applyPatch({ sampler: nextSampler })
+        const nextLibrary = nextSampler.id
+          ? state.samplerLibrary.map((item) => (item.id === nextSampler.id ? { ...item, ...changes } : item))
+          : state.samplerLibrary
+        return { patch: { ...state.patch, sampler: nextSampler }, samplerLibrary: nextLibrary }
+      }),
+      renameSamplerSample: (id, name) => set((state) => {
+        const trimmed = name.trim()
+        if (!trimmed) return {}
+        let changed = false
+        const nextLibrary = state.samplerLibrary.map((item) => {
+          if (item.id !== id) return item
+          changed = true
+          return { ...item, name: trimmed }
+        })
+        if (!changed) return {}
+        let nextPatch = state.patch
+        if (state.patch.sampler.id === id) {
+          const nextSampler = { ...state.patch.sampler, name: trimmed }
+          state.engine?.applyPatch({ sampler: nextSampler })
+          nextPatch = { ...state.patch, sampler: nextSampler }
+        }
+        return { samplerLibrary: nextLibrary, patch: nextPatch }
+      }),
     }),
     {
       name: 'websynth-patch',
@@ -133,6 +196,7 @@ export const useStore = create<State>()(
           sequencer: state.patch.sequencer ? { ...state.patch.sequencer, playing: false } : state.patch.sequencer,
           arp: state.patch.arp ? { ...state.patch.arp, bpmSync: state.patch.arp.bpmSync ?? true } : state.patch.arp,
         },
+        samplerLibrary: state.samplerLibrary,
         layoutOrder: state.layoutOrder,
         tempo: state.tempo,
         transport: { tempo: state.transport.tempo, playing: false, tick: 0 },
@@ -141,7 +205,7 @@ export const useStore = create<State>()(
           selectedInputId: state.midi.selectedInputId,
         },
       }),
-      version: 8,
+      version: 10,
       migrate: (persistedState: any, version: number) => {
         // Ensure new fields (osc2, mix) exist by merging with defaults
         const p = persistedState?.patch
@@ -157,6 +221,7 @@ export const useStore = create<State>()(
           filter: { ...defaultPatch.filter, ...(p.filter || {}) },
           envelope: { ...defaultPatch.envelope, ...(p.envelope || {}) },
           master: { ...defaultPatch.master, ...(p.master || {}) },
+          sampler: { ...defaultPatch.sampler, ...(p.sampler || {}) },
           macro: { ...defaultPatch.macro!, ...(p.macro || {}) },
           effects: { ...defaultPatch.effects!, ...(p.effects || {}) },
           lfo1: { ...defaultPatch.lfo1!, ...(p.lfo1 || {}) },
@@ -184,9 +249,17 @@ export const useStore = create<State>()(
           lastError: null as string | null,
           activeNotes: [] as number[],
         }
+        const library = Array.isArray(persistedState?.samplerLibrary)
+          ? (persistedState.samplerLibrary as any[]).map((item, index) => ({
+              ...defaultPatch.sampler,
+              ...(item ?? {}),
+              id: typeof item?.id === 'string' ? item.id : `legacy-${Date.now()}-${index}`,
+            }))
+          : []
         return {
           ...persistedState,
           patch: migratedPatch,
+          samplerLibrary: library,
           layoutOrder,
           tempo,
           transport: migratedTransport,
