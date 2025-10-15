@@ -57,6 +57,104 @@ body {
   fill: currentColor;
 }
 
+.buy-coffee {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+}
+
+.buy-coffee-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: transparent;
+  text-decoration: none;
+  transition: transform 150ms ease, filter 150ms ease;
+}
+
+.buy-coffee-link img {
+  display: block;
+  height: 48px;
+  width: auto;
+  border-radius: 999px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+}
+
+.buy-coffee-link:hover {
+  transform: translateY(-2px) scale(1.02);
+  filter: brightness(1.05);
+}
+
+.buy-coffee-link:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 3px;
+}
+
+.buy-coffee-dismiss {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid #2a3040;
+  background: #0e1116;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: transform 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.buy-coffee-dismiss:hover {
+  transform: scale(1.05);
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+.buy-coffee-dismiss:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 3px;
+}
+
+.buy-coffee.collapsed {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+}
+
+.buy-coffee-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid #2a3040;
+  background: #111319;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 22px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+  transition: transform 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.buy-coffee-icon:hover {
+  transform: translateY(-2px) scale(1.05);
+  background: #151821;
+}
+
+.buy-coffee-icon:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 3px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

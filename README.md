@@ -4,6 +4,7 @@ WebSynth Studio is a browser-based analogue-style synthesizer built with React, 
 
 - **Repository**: https://github.com/szabadkai/synth-demo
 - **Live demo**: https://szabadkai.github.io/synth-demo (replace `szabadkai` with your GitHub username when deploying forks via GitHub Pages)
+- **Buy me a coffee**: https://buymeacoffee.com/szabadkai
 
 ## Highlights
 

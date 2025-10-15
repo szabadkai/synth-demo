@@ -21,6 +21,7 @@ import { MidiManager } from './MidiManager'
 import { MidiSettings } from './MidiSettings'
 import { GitHubCorner } from './GitHubCorner'
 import { OnboardingGuide } from './OnboardingGuide'
+import { BuyCoffeeButton } from './BuyCoffeeButton'
 
 const GUIDE_STORAGE_KEY = 'websynth-guide-seen'
 const HELP_PANEL_IDS = ['oscilloscope', 'oscillator', 'effects', 'lfos', 'arp', 'sequencer', 'drum', 'keyboard'] as const
@@ -325,6 +326,7 @@ export function App() {
   return (
     <div className="app">
       <GitHubCorner />
+      <BuyCoffeeButton />
       <MidiManager />
       <header className="header">
         <h2>WebSynth Studio</h2>
