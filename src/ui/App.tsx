@@ -322,6 +322,14 @@ export function App() {
   }), [])
 
   const activeHelp = helpPanel ? panelHelpContent[helpPanel] : null
+  const closeGuide = () => {
+    try {
+      localStorage.setItem(GUIDE_STORAGE_KEY, '1')
+    } catch {
+      // ignore storage access issues
+    }
+    setGuideOpen(false)
+  }
 
   return (
     <div className="app">
@@ -365,18 +373,11 @@ export function App() {
       </SettingsModal>
       <SettingsModal
         open={guideOpen}
-        onClose={() => {
-          try {
-            localStorage.setItem(GUIDE_STORAGE_KEY, '1')
-          } catch {
-            // ignore storage access issues
-          }
-          setGuideOpen(false)
-        }}
+        onClose={closeGuide}
         title="Onboarding Guide"
         closeLabel="Close help overlay"
       >
-        <OnboardingGuide />
+        <OnboardingGuide onFinish={closeGuide} />
       </SettingsModal>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}>
         <section className="settings-section">

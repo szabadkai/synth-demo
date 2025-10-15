@@ -1,5 +1,9 @@
 import React from 'react'
 
+interface OnboardingGuideProps {
+  onFinish?: () => void
+}
+
 const guideSections: Array<{
   title: string
   points: string[]
@@ -70,7 +74,7 @@ const guideSections: Array<{
   },
 ]
 
-export function OnboardingGuide() {
+export function OnboardingGuide({ onFinish }: OnboardingGuideProps) {
   return (
     <div className="onboarding-guide">
       <p className="onboarding-intro">
@@ -89,6 +93,15 @@ export function OnboardingGuide() {
           </li>
         ))}
       </ol>
+      <button
+        type="button"
+        className="onboarding-cta"
+        onClick={() => {
+          onFinish?.()
+        }}
+      >
+        Let&apos;s go
+      </button>
     </div>
   )
 }

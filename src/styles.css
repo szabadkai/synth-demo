@@ -184,6 +184,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  align-items: stretch;
 }
 
 .onboarding-intro {
@@ -206,7 +207,7 @@ body {
   font-size: 15px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--accent-2);
+  color: #2dd4bf;
 }
 
 .onboarding-section ul {
@@ -217,6 +218,33 @@ body {
   gap: 6px;
   font-size: 14px;
   line-height: 1.5;
+}
+
+.onboarding-cta {
+  align-self: center;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #022c2c;
+  background: linear-gradient(135deg, #5eead4, #2dd4bf);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  transition: transform 150ms ease, filter 150ms ease, box-shadow 150ms ease;
+  margin-top: 12px;
+}
+
+.onboarding-cta:hover {
+  transform: translateY(-1px) scale(1.02);
+  filter: brightness(1.05);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.32);
+}
+
+.onboarding-cta:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 3px;
 }
 
 .grid {
