@@ -10,32 +10,51 @@ type Props = {
   formatValue?: (value: number) => string
   onChange: (v: number) => void
   disabled?: boolean
+  showValue?: boolean
 }
 
-export function Knob({ value, min, max, step = 0.01, size = 56, label, formatValue, onChange, disabled = false }: Props) {
+export function Knob({
+  value,
+  min,
+  max,
+  step = 0.01,
+  size = 56,
+  label,
+  formatValue,
+  onChange,
+  disabled = false,
+  showValue = true,
+}: Props) {
   const [active, setActive] = useState(false)
   const start = useRef<{ y: number; v: number } | null>(null)
   const clamp = useCallback((v: number) => Math.min(max, Math.max(min, v)), [min, max])
   const range = max - min
   const norm = range === 0 ? 0 : (value - min) / range
   const angle = useMemo(() => -135 + norm * 270, [norm])
+  const formattedValue = formatValue ? formatValue(value) : formatNumber(value)
 
-  const onPointerDown = (e: React.PointerEvent) => {
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (disabled) return
-    ;(e.target as Element).setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
     start.current = { y: e.clientY, v: value }
     setActive(true)
   }
-  const onPointerMove = (e: React.PointerEvent) => {
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!start.current || disabled) return
+    if (e.buttons === 0) {
+      start.current = null
+      setActive(false)
+      try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+      return
+    }
     const dy = start.current.y - e.clientY
     const delta = (dy / 150) * range
     const next = clamp(start.current.v + delta)
     onChange(roundTo(next, step))
   }
-  const onPointerUp = (e: React.PointerEvent) => {
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
     if (disabled) return
-    ;(e.target as Element).releasePointerCapture(e.pointerId)
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
     start.current = null
     setActive(false)
   }
@@ -56,7 +75,17 @@ export function Knob({ value, min, max, step = 0.01, size = 56, label, formatVal
   const indicatorY = cy + Math.sin((angle * Math.PI) / 180) * (r - 6)
 
   return (
-    <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 6, opacity: disabled ? 0.4 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+    <div
+      style={{
+        display: 'inline-flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 6,
+        opacity: disabled ? 0.4 : 1,
+        pointerEvents: disabled ? 'none' : 'auto',
+        width: size,
+      }}
+    >
       <svg
         width={size}
         height={size}
@@ -69,7 +98,7 @@ export function Knob({ value, min, max, step = 0.01, size = 56, label, formatVal
         aria-valuemin={min}
         aria-valuemax={max}
         aria-valuenow={value}
-        aria-valuetext={formatValue ? formatValue(value) : formatNumber(value)}
+        aria-valuetext={formattedValue}
         tabIndex={disabled ? -1 : 0}
         style={{ cursor: disabled ? 'default' : 'ns-resize', outline: active ? '1px solid var(--accent)' : 'none', borderRadius: 8 }}
       >
@@ -78,10 +107,10 @@ export function Knob({ value, min, max, step = 0.01, size = 56, label, formatVal
         <circle cx={startX} cy={startY} r={2.4} fill="#3dd973" stroke="#12161f" strokeWidth={0.8} />
         <line x1={cx} y1={cy} x2={indicatorX} y2={indicatorY} stroke="var(--accent)" strokeWidth={3} strokeLinecap="round" />
       </svg>
-      {label && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-          <span className="label">{label}</span>
-          <span className="value">{formatValue ? formatValue(value) : formatNumber(value)}</span>
+      {(label || showValue) && (
+        <div className="knob-legend">
+          {label ? <span className="label">{label}</span> : null}
+          {showValue ? <span className="value">{formattedValue}</span> : null}
         </div>
       )}
     </div>

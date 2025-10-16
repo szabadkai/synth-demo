@@ -26,7 +26,7 @@ export type SamplerSettings = {
 export type EngineMode = 'classic' | 'macro' | 'sampler'
 
 export type Patch = {
-  osc1: { wave: WaveType; detune: number; finePct?: number }
+  osc1: { wave: WaveType; detune: number; detuneFine?: number; octave?: number }
   osc2: { wave: WaveType; detune: number }
   mix: number // 0 = osc1 only, 1 = osc2 only
   fm: { enabled: boolean; ratio: number; amount: number } // amount in Hz added to carrier freq
@@ -88,7 +88,7 @@ export type Patch = {
 }
 
 export const defaultPatch: Patch = {
-  osc1: { wave: 'sawtooth', detune: 0, finePct: 0 },
+  osc1: { wave: 'sawtooth', detune: 0, detuneFine: 0, octave: 0 },
   osc2: { wave: 'square', detune: 0 },
   mix: 0.0,
   fm: { enabled: false, ratio: 2.0, amount: 0 },
@@ -450,9 +450,8 @@ export class SynthEngine {
   private getDetuneCents(which: 'osc1' | 'osc2') {
     if (which === 'osc1') {
       const coarse = this.patch.osc1.detune || 0
-      const finePct = (this.patch.osc1.finePct ?? 0) / 100
-      const delta = Math.abs(coarse) * 0.05 * finePct
-      return coarse + delta
+      const fine = this.patch.osc1.detuneFine ?? 0
+      return coarse + fine
     }
     return this.patch.osc2.detune || 0
   }
@@ -577,12 +576,9 @@ export class SynthEngine {
     if (p.sequencer !== undefined) this.updateSeqScheduler()
 
     // Live-detune updates for currently playing voices
-    if (p.osc1?.detune !== undefined || p.osc1?.finePct !== undefined) {
+    if (p.osc1?.detune !== undefined || p.osc1?.detuneFine !== undefined) {
       const now = this.ctx.currentTime
-      const coarse = next.osc1.detune || 0
-      const finePct = (next.osc1.finePct ?? 0) / 100
-      const delta = Math.abs(coarse) * 0.05 * finePct
-      const effectiveDetune = coarse + delta
+      const effectiveDetune = (next.osc1.detune || 0) + (next.osc1.detuneFine ?? 0)
       for (const v of this.activeVoices.values()) {
         if (v.osc1Detune) {
           try { v.osc1Detune.setTargetAtTime(effectiveDetune, now, 0.01) } catch {}
@@ -1119,6 +1115,19 @@ export class SynthEngine {
     oscGain.gain.value = 0
     oscGain.connect(this.filter)
 
+    // Scale peak amplitude inversely with active voice load (sqrt keeps dynamics present)
+    const activeVoiceCount = this.activeVoices.size
+    const VOICE_GAIN_BASE = 0.65
+    const voiceGainScale = VOICE_GAIN_BASE / Math.max(1, Math.sqrt(activeVoiceCount + 1))
+
+    const clampOctave = (value: number | undefined) => {
+      const n = Number(value ?? 0)
+      if (!Number.isFinite(n)) return 0
+      return Math.max(-3, Math.min(3, Math.round(n)))
+    }
+    const osc1Octave = clampOctave(this.patch.osc1.octave)
+    const osc1Freq = freq * Math.pow(2, osc1Octave)
+
     const engineMode = this.patch.engineMode ?? 'classic'
 
     // Macro engine path
@@ -1174,8 +1183,8 @@ export class SynthEngine {
       const g = oscGain.gain
       g.cancelScheduledValues(now)
       g.setValueAtTime(0, now)
-      g.linearRampToValueAtTime(1, now + Math.max(0.001, env.attack))
-      g.linearRampToValueAtTime(env.sustain, now + env.attack + Math.max(0.001, env.decay))
+      g.linearRampToValueAtTime(voiceGainScale, now + Math.max(0.001, env.attack))
+      g.linearRampToValueAtTime(env.sustain * voiceGainScale, now + env.attack + Math.max(0.001, env.decay))
 
       const stop = (releaseTime: number) => {
         const t = Math.max(this.ctx.currentTime, releaseTime)
@@ -1191,7 +1200,7 @@ export class SynthEngine {
     // Sampler engine path
     if (engineMode === 'sampler') {
       const sources: AudioScheduledSourceNode[] = []
-      const samplerSource = this.createSamplerSource(freq, 'osc1')
+      const samplerSource = this.createSamplerSource(osc1Freq, 'osc1')
       if (samplerSource) {
         samplerSource.connect(oscGain)
         sources.push(samplerSource)
@@ -1221,8 +1230,8 @@ export class SynthEngine {
         const g = oscGain.gain
         g.cancelScheduledValues(now)
         g.setValueAtTime(0, now)
-        g.linearRampToValueAtTime(1, now + Math.max(0.001, env.attack))
-        g.linearRampToValueAtTime(env.sustain, now + env.attack + Math.max(0.001, env.decay))
+        g.linearRampToValueAtTime(voiceGainScale, now + Math.max(0.001, env.attack))
+        g.linearRampToValueAtTime(env.sustain * voiceGainScale, now + env.attack + Math.max(0.001, env.decay))
 
         for (const s of sources) {
           if ('start' in s && !(s as any)._autoStarted) (s as any).start()
@@ -1277,16 +1286,13 @@ export class SynthEngine {
         src.loop = true
         s1 = src
       } else if (this.patch.osc1.wave === 'sample') {
-        s1 = this.createSamplerSource(freq, 'osc1')
+        s1 = this.createSamplerSource(osc1Freq, 'osc1')
       } else {
         const osc = this.ctx.createOscillator()
         osc.type = this.patch.osc1.wave as OscillatorType
-        osc.frequency.setValueAtTime(freq, now)
-        const coarse = this.patch.osc1.detune || 0
-        const finePct = (this.patch.osc1.finePct ?? 0) / 100 // -1..1
-        const delta = Math.abs(coarse) * 0.05 * finePct
-        const effectiveDetune = coarse + delta
-        osc.detune.value = effectiveDetune
+        osc.frequency.setValueAtTime(osc1Freq, now)
+        const fine = this.patch.osc1.detuneFine ?? 0
+        osc.detune.value = (this.patch.osc1.detune || 0) + fine
         s1 = osc
         osc1Node = osc
       }
@@ -1382,8 +1388,8 @@ export class SynthEngine {
     const g = oscGain.gain
     g.cancelScheduledValues(now)
     g.setValueAtTime(0, now)
-    g.linearRampToValueAtTime(1, now + Math.max(0.001, env.attack))
-    g.linearRampToValueAtTime(env.sustain, now + env.attack + Math.max(0.001, env.decay))
+    g.linearRampToValueAtTime(voiceGainScale, now + Math.max(0.001, env.attack))
+    g.linearRampToValueAtTime(env.sustain * voiceGainScale, now + env.attack + Math.max(0.001, env.decay))
 
     for (const s of sources) {
       if ('start' in s && !(s as any)._autoStarted) (s as any).start()

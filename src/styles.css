@@ -389,6 +389,24 @@ select, input[type="number"], input[type="text"] {
 }
 
 .kbd-row { display: flex; align-items: center; gap: 8px; }
+.keyboard-shift-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.keyboard-shift-button:hover .kbd {
+  background: #11304a;
+}
+.keyboard-shift-button:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
 
 .hint-text { font-size: 12px; color: var(--muted); }
 
@@ -401,7 +419,7 @@ select, input[type="number"], input[type="text"] {
 /* Make form controls inside oscillator grid stack label and control neatly */
 .controls-grid > label {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .controls-grid select {
@@ -419,6 +437,10 @@ input[type="range"][disabled] {
 .label { font-size: 12px; color: var(--muted); }
 
 .value { font-size: 12px; color: var(--text); opacity: 0.9; }
+.knob-legend { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; text-align: center; }
+.knob-legend .label { white-space: nowrap; }
+.knob-legend .label { text-align: center; }
+.knob-legend .value { font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; }
 
 /* Keyboard UI helpers */
 .kbd {
@@ -779,6 +801,71 @@ input[type="range"][disabled] {
 .settings-help {
   margin: 0;
   font-size: 12px;
+  color: var(--muted);
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-subheading {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.fft-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fft-option {
+  flex: 1 1 160px;
+  min-width: 140px;
+  border: 1px solid #1f2933;
+  border-radius: 10px;
+  background: #0c0f16;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+.fft-option:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-2);
+  color: var(--text);
+}
+
+.fft-option.active {
+  border-color: var(--accent-2);
+  background: rgba(99, 179, 237, 0.15);
+  color: var(--text);
+}
+
+.fft-option:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+.fft-option__label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fft-option__hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
   color: var(--muted);
 }
 

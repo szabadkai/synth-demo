@@ -22,6 +22,7 @@ import { MidiSettings } from './MidiSettings'
 import { GitHubCorner } from './GitHubCorner'
 import { OnboardingGuide } from './OnboardingGuide'
 import { BuyCoffeeButton } from './BuyCoffeeButton'
+import { OscilloscopeSettings } from './OscilloscopeSettings'
 
 const GUIDE_STORAGE_KEY = 'websynth-guide-seen'
 const HELP_PANEL_IDS = ['oscilloscope', 'oscillator', 'effects', 'lfos', 'arp', 'sequencer', 'drum', 'keyboard'] as const
@@ -387,6 +388,10 @@ export function App() {
         <section className="settings-section">
           <h4 className="settings-heading">Expression</h4>
           <ExpressionPanel />
+        </section>
+        <section className="settings-section">
+          <h4 className="settings-heading">Visualization</h4>
+          <OscilloscopeSettings />
         </section>
         <section className="settings-section">
           <h4 className="settings-heading">MIDI</h4>

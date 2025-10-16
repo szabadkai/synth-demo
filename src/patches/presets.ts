@@ -2,7 +2,7 @@ import { Patch, defaultPatch } from '../audio-engine/engine'
 
 export const presets: Record<string, Patch> = {
   init: {
-    osc1: { wave: 'sawtooth', detune: 0, finePct: 0 },
+    osc1: { wave: 'sawtooth', detune: 0, detuneFine: 0 },
     osc2: { wave: 'square', detune: 0 },
     mix: 0.0,
     fm: { enabled: false, ratio: 2, amount: 0 },
@@ -14,7 +14,7 @@ export const presets: Record<string, Patch> = {
     sampler: { ...defaultPatch.sampler },
   },
   mellowPad: {
-    osc1: { wave: 'triangle', detune: -5, finePct: 0 },
+    osc1: { wave: 'triangle', detune: -5, detuneFine: 0 },
     osc2: { wave: 'sawtooth', detune: 3 },
     mix: 0.35,
     fm: { enabled: false, ratio: 2, amount: 0 },
@@ -26,7 +26,7 @@ export const presets: Record<string, Patch> = {
     sampler: { ...defaultPatch.sampler },
   },
   brightLead: {
-    osc1: { wave: 'square', detune: 3, finePct: 0 },
+    osc1: { wave: 'square', detune: 3, detuneFine: 0 },
     osc2: { wave: 'sawtooth', detune: -6 },
     mix: 0.5,
     fm: { enabled: true, ratio: 1.5, amount: 120 },

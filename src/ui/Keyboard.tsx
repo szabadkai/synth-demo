@@ -197,8 +197,22 @@ export function Keyboard() {
         </div>
         <div className="kbd-help">
           <div className="badge" style={{ alignSelf: 'flex-start' }}>Octave shift</div>
-          <div className="kbd-row"><span className="kbd">Z</span><span className="hint-text">down</span></div>
-          <div className="kbd-row"><span className="kbd">X</span><span className="hint-text">up</span></div>
+        <button
+          className="kbd-row keyboard-shift-button"
+          onClick={() => setBaseMidi((m) => Math.max(24, m - 12))}
+          type="button"
+        >
+          <span className="kbd">Z</span>
+          <span className="hint-text">Octave Down</span>
+        </button>
+        <button
+          className="kbd-row keyboard-shift-button"
+          onClick={() => setBaseMidi((m) => Math.min(96, m + 12))}
+          type="button"
+        >
+          <span className="kbd">X</span>
+          <span className="hint-text">Octave Up</span>
+        </button>
         </div>
       </div>
     </div>

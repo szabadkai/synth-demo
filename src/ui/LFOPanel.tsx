@@ -32,12 +32,10 @@ function LfoRow({ idx }: { idx: 1 | 2 }) {
         </select>
       </label>
       <div className="knob-group">
-        <span className="label">Rate</span>
-        <Knob label={undefined} min={0.01} max={20} step={0.01} value={lfo.rateHz} onChange={(v) => update({ [key]: { ...lfo, rateHz: v } } as any)} disabled={!lfo.enabled} />
+        <Knob label="Rate" min={0.01} max={20} step={0.01} value={lfo.rateHz} onChange={(v) => update({ [key]: { ...lfo, rateHz: v } } as any)} disabled={!lfo.enabled} formatValue={(v) => `${v.toFixed(2)} Hz`} />
       </div>
       <div className="knob-group">
-        <span className="label">Amount</span>
-        <Knob label={undefined} min={0} max={1} step={0.01} value={lfo.amount} onChange={(v) => update({ [key]: { ...lfo, amount: v } } as any)} disabled={!lfo.enabled} />
+        <Knob label="Amount" min={0} max={1} step={0.01} value={lfo.amount} onChange={(v) => update({ [key]: { ...lfo, amount: v } } as any)} disabled={!lfo.enabled} formatValue={(v) => `${Math.round(v * 100)}%`} />
       </div>
     </div>
   )

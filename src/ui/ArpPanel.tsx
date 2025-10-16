@@ -41,7 +41,7 @@ export function ArpPanel() {
 
   return (
     <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-      {/* Row 1: toggles + clear + mode */}
+      {/* Row 1: toggles + clear */}
       <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <input
           type="checkbox"
@@ -70,82 +70,82 @@ export function ArpPanel() {
       >
         Clear
       </button>
-      <label>
-        <div className="label">Mode</div>
-        <select value={arp.mode} onChange={(e) => update({ arp: { ...arp, mode: e.target.value as any } })} disabled={!arp.enabled}>
-          <option value="up">Up</option>
-          <option value="down">Down</option>
-          <option value="updown">Up-Down</option>
-          <option value="random">Random</option>
-          <option value="asplayed">As Played</option>
-        </select>
-      </label>
 
-      {/* Row 2: octaves + sync + division/rate + bpm */}
-      <label>
-        <div className="label">Octaves</div>
-        <select value={arp.octaves} onChange={(e) => update({ arp: { ...arp, octaves: Number(e.target.value) } })} disabled={!arp.enabled}>
-          <option value={1}>1</option>
-          <option value={2}>2</option>
-          <option value={3}>3</option>
-          <option value={4}>4</option>
-        </select>
-      </label>
-      <label>
-        <div className="label">Chord</div>
-        <select
-          value={chordSource === 'sequencer' ? 'sequencer' : (arp.chord ?? 'none')}
-          onChange={(e) => {
-            const value = e.target.value as string
-            if (value === 'sequencer') {
-              setArp({ chordSource: 'sequencer' })
-            } else {
-              setArp({ chordSource: 'preset', chord: value as NonNullable<Patch['arp']>['chord'] })
-            }
-          }}
-          disabled={!arp.enabled}
-        >
-          <option value="none">Single</option>
-          <option value="power">Power (5th)</option>
-          <option value="major">Major Triad</option>
-          <option value="minor">Minor Triad</option>
-          <option value="sus2">Sus2</option>
-          <option value="sus4">Sus4</option>
-          <option value="maj7">Major 7th</option>
-          <option value="min7">Minor 7th</option>
-          <option value="sequencer">Sequencer Pattern</option>
-        </select>
-      </label>
+      {/* Row 2: dropdowns */}
+      <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end' }}>
+        <label>
+          <div className="label">Mode</div>
+          <select value={arp.mode} onChange={(e) => update({ arp: { ...arp, mode: e.target.value as any } })} disabled={!arp.enabled}>
+            <option value="up">Up</option>
+            <option value="down">Down</option>
+            <option value="updown">Up-Down</option>
+            <option value="random">Random</option>
+            <option value="asplayed">As Played</option>
+          </select>
+        </label>
+        <label>
+          <div className="label">Octaves</div>
+          <select value={arp.octaves} onChange={(e) => update({ arp: { ...arp, octaves: Number(e.target.value) } })} disabled={!arp.enabled}>
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+            <option value={4}>4</option>
+          </select>
+        </label>
+        <label>
+          <div className="label">Chord</div>
+          <select
+            value={chordSource === 'sequencer' ? 'sequencer' : (arp.chord ?? 'none')}
+            onChange={(e) => {
+              const value = e.target.value as string
+              if (value === 'sequencer') {
+                setArp({ chordSource: 'sequencer' })
+              } else {
+                setArp({ chordSource: 'preset', chord: value as NonNullable<Patch['arp']>['chord'] })
+              }
+            }}
+            disabled={!arp.enabled}
+          >
+            <option value="none">Single</option>
+            <option value="power">Power (5th)</option>
+            <option value="major">Major Triad</option>
+            <option value="minor">Minor Triad</option>
+            <option value="sus2">Sus2</option>
+            <option value="sus4">Sus4</option>
+            <option value="maj7">Major 7th</option>
+            <option value="min7">Minor 7th</option>
+            <option value="sequencer">Sequencer Pattern</option>
+          </select>
+        </label>
+        <label>
+          <div className="label">Division</div>
+          <select value={arp.division} onChange={(e) => setArp({ division: e.target.value as any })} disabled={!arp.enabled}>
+            <option value="1/4">1/4</option>
+            <option value="1/8">1/8</option>
+            <option value="1/8T">1/8T</option>
+            <option value="1/16">1/16</option>
+            <option value="1/16T">1/16T</option>
+          </select>
+        </label>
+      </div>
       {chordSource === 'sequencer' && (
-        <div className="hint-text" style={{ gridColumn: 'span 2', fontSize: 12, opacity: 0.8, alignSelf: 'end' }}>
+        <div className="hint-text" style={{ gridColumn: '1 / -1', fontSize: 12, opacity: 0.8, alignSelf: 'start' }}>
           Sequencer pattern{sequencerChordCount > 0 ? ` • ${sequencerChordCount} interval${sequencerChordCount === 1 ? '' : 's'}` : ' • no active steps yet'}
         </div>
       )}
-      <label>
-        <div className="label">Division</div>
-        <select value={arp.division} onChange={(e) => setArp({ division: e.target.value as any })} disabled={!arp.enabled}>
-          <option value="1/4">1/4</option>
-          <option value="1/8">1/8</option>
-          <option value="1/8T">1/8T</option>
-          <option value="1/16">1/16</option>
-          <option value="1/16T">1/16T</option>
-        </select>
-      </label>
-      <Knob
-        label="BPM"
-        min={40}
-        max={240}
-        step={1}
-        value={tempo}
-        onChange={(v) => {
-          setTempo(v)
-          setArp({ bpm: v, bpmSync: true })
-        }}
-        disabled={!arp.enabled}
-      />
-
-      {/* Row 3: gate across */}
-      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 32, alignItems: 'center', justifyContent: 'flex-start', padding: '6px 0' }}>
+      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 20, alignItems: 'center', justifyContent: 'flex-start', padding: '6px 0' }}>
+        <Knob
+          label="Tempo"
+          min={40}
+          max={240}
+          step={1}
+          value={tempo}
+          onChange={(v) => {
+            setTempo(v)
+            setArp({ bpm: v, bpmSync: true })
+          }}
+          disabled={!arp.enabled}
+        />
         <Knob label="Gate" min={0.05} max={1} step={0.01} value={arp.gate} onChange={(v) => update({ arp: { ...arp, gate: v } })} disabled={!arp.enabled} />
         <Knob label="Swing" min={0} max={0.75} step={0.01} value={arp.swingPct ?? 0} onChange={(v) => update({ arp: { ...arp, swingPct: v } })} disabled={!arp.enabled || !(arp.bpmSync)} />
       </div>

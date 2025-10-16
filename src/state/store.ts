@@ -15,6 +15,9 @@ export type State = {
   patch: Patch
   samplerLibrary: SamplerSettings[]
   layoutOrder: string[]
+  oscilloscope: {
+    fftSize: 1024 | 2048 | 4096 | 8192
+  }
   transport: {
     tempo: number
     playing: boolean
@@ -44,6 +47,7 @@ export type State = {
   setMidiInputs: (inputs: MidiDeviceInfo[]) => void
   setMidiSelectedInput: (id: string | null) => void
   setMidiActiveNotes: (notes: number[]) => void
+  setOscilloscopeFftSize: (size: 1024 | 2048 | 4096 | 8192) => void
   saveSamplerSample: (sample: SamplerSettings) => void
   deleteSamplerSample: (id: string) => void
   setSamplerFromLibrary: (id: string) => void
@@ -58,6 +62,7 @@ export const useStore = create<State>()(
       patch: defaultPatch,
       samplerLibrary: [],
       layoutOrder: [],
+      oscilloscope: { fftSize: 4096 },
       tempo: 110,
       transport: { tempo: 110, playing: false, tick: 0 },
       midi: {
@@ -133,6 +138,7 @@ export const useStore = create<State>()(
       setMidiInputs: (inputs) => set((state) => ({ midi: { ...state.midi, inputs } })),
       setMidiSelectedInput: (id) => set((state) => ({ midi: { ...state.midi, selectedInputId: id } })),
       setMidiActiveNotes: (notes) => set((state) => ({ midi: { ...state.midi, activeNotes: notes } })),
+      setOscilloscopeFftSize: (size) => set((state) => ({ oscilloscope: { fftSize: size } })),
       saveSamplerSample: (sample) => set((state) => {
         const id = sample.id ?? `sample-${Date.now()}`
         const sanitized: SamplerSettings = { ...defaultPatch.sampler, ...sample, id }
@@ -204,16 +210,19 @@ export const useStore = create<State>()(
           enabled: state.midi.enabled,
           selectedInputId: state.midi.selectedInputId,
         },
+        oscilloscope: state.oscilloscope,
       }),
-      version: 10,
+      version: 11,
       migrate: (persistedState: any, version: number) => {
         // Ensure new fields (osc2, mix) exist by merging with defaults
         const p = persistedState?.patch
         if (!p) return persistedState
+        const legacyOsc1 = p.osc1 || {}
+        const { finePct: _legacyFine, ...osc1Rest } = legacyOsc1
         const migratedPatch: Patch = {
           ...defaultPatch,
           ...p,
-          osc1: { ...defaultPatch.osc1, ...(p.osc1 || {}) },
+          osc1: { ...defaultPatch.osc1, ...osc1Rest },
           osc2: { ...defaultPatch.osc2, ...(p.osc2 || {}) },
           fm: { ...defaultPatch.fm, ...(p.fm || {}) },
           sub: { ...defaultPatch.sub, ...(p.sub || {}) },
@@ -256,6 +265,11 @@ export const useStore = create<State>()(
               id: typeof item?.id === 'string' ? item.id : `legacy-${Date.now()}-${index}`,
             }))
           : []
+        const allowedFft = [1024, 2048, 4096, 8192] as const
+        const persistedFft = persistedState?.oscilloscope?.fftSize
+        const fftSize: typeof allowedFft[number] = allowedFft.includes(persistedFft)
+          ? (persistedFft as typeof allowedFft[number])
+          : 4096
         return {
           ...persistedState,
           patch: migratedPatch,
@@ -264,12 +278,16 @@ export const useStore = create<State>()(
           tempo,
           transport: migratedTransport,
           midi: migratedMidi,
+          oscilloscope: { fftSize },
         }
       },
       onRehydrateStorage: () => (state) => {
         // Ensure engine is not restored from storage
         if (!state) return
         state.engine = null
+        if (!state.oscilloscope || ![1024, 2048, 4096, 8192].includes(state.oscilloscope.fftSize as any)) {
+          state.oscilloscope = { fftSize: 4096 }
+        }
         if (!Array.isArray(state.layoutOrder)) state.layoutOrder = []
         if (typeof state.tempo !== 'number') state.tempo = 110
         if (!state.transport) state.transport = { tempo: state.tempo, playing: false, tick: 0 }

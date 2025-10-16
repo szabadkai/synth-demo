@@ -163,32 +163,39 @@ export function OscillatorPanel() {
       {/* Osc 1 controls row */}
       <div className="osc-knob-row" style={{ gridColumn: '1 / 2' }}>
         <div className="knob-group">
-          <span className="label">Detune</span>
-          <Knob label={undefined} min={-1200} max={1200} step={1} value={patch.osc1.detune} onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, detune: v } })} />
+          <Knob
+            label="Octave"
+            min={-2}
+            max={2}
+            step={1}
+            value={patch.osc1.octave ?? 0}
+            onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, octave: Math.round(v) } })}
+            formatValue={(v) => `${Math.round(v)}`}
+          />
         </div>
         <div className="knob-group">
-          <span className="label">Fine %</span>
-          <Knob label={undefined} min={-100} max={100} step={1} value={patch.osc1.finePct ?? 0} onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, finePct: v } })} />
+          <Knob label="Detune" min={-1200} max={1200} step={1} value={patch.osc1.detune} onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, detune: v } })} formatValue={(v) => `${Math.round(v)}¢`} />
+        </div>
+        <div className="knob-group">
+          <Knob
+            label="Fine"
+            min={-10}
+            max={10}
+            step={0.1}
+            value={patch.osc1.detuneFine ?? 0}
+            onChange={(v: number) => updatePatch({ osc1: { ...patch.osc1, detuneFine: Number(v.toFixed(1)) } })}
+            formatValue={(v) => `${v.toFixed(1)}¢`}
+          />
         </div>
       </div>
       <div className="osc-knob-row" style={{ gridColumn: '2 / 3', justifyContent: 'flex-end' }}>
         <div className="knob-group">
-          <span className="label">Mix</span>
-          <Knob label={undefined} min={0} max={1} step={0.01} value={patch.mix} onChange={(v: number) => updatePatch({ mix: v })} />
+          <Knob label="Mix" min={0} max={1} step={0.01} value={patch.mix} onChange={(v: number) => updatePatch({ mix: v })} formatValue={(v) => `${Math.round(v * 100)}%`} />
         </div>
       </div>
 
-      {/* Row: FM Controls spanning both columns */}
-      <div
-        style={{
-          gridColumn: '1 / -1',
-          display: 'flex',
-          gridTemplateColumns: 'auto auto auto',
-          justifyItems: 'start',
-          gap: 16,
-          alignItems: 'center',
-        }}
-      >
+      {/* FM + Ring controls */}
+      <div style={{ gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 120 }}>
           <input
             type="checkbox"
@@ -215,19 +222,6 @@ export function OscillatorPanel() {
           onChange={(v: number) => updatePatch({ fm: { ...patch.fm, amount: v } })}
           disabled={!(patch.fm?.enabled ?? false)}
         />
-      </div>
-
-      {/* Row: Ring Modulation Controls spanning both columns */}
-      <div
-        style={{
-          gridColumn: '1 / -1',
-          display: 'flex',
-          gridTemplateColumns: 'auto auto',
-          justifyItems: 'start',
-          gap: 16,
-          alignItems: 'center',
-        }}
-      >
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 120 }}>
           <input
             type="checkbox"

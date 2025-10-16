@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useStore, type State } from '../state/store'
 
 const LOCK = {
@@ -20,7 +20,7 @@ export function Oscilloscope() {
   const holdCounterRef = useRef<number>(0)
   const templateRef = useRef<Float32Array | null>(null)
   const templateLenRef = useRef<number>(128)
-  const [fftSize, setFftSize] = useState<1024 | 2048 | 4096 | 8192>(4096)
+  const fftSize = useStore((s: State) => s.oscilloscope.fftSize)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -260,17 +260,6 @@ export function Oscilloscope() {
   return (
     <div>
       <canvas ref={canvasRef} width={600} height={300} style={{ width: '100%', height: 300, borderRadius: 8, border: '1px solid #222631' }} />
-      <div className="row" style={{ marginTop: 8, gap: 12, alignItems: 'center' }}>
-        <label>
-          <div className="label">FFT Size</div>
-          <select value={fftSize} onChange={(e) => setFftSize(Number(e.target.value) as 1024 | 2048 | 4096 | 8192)}>
-            <option value={1024}>1024</option>
-            <option value={2048}>2048</option>
-            <option value={4096}>4096</option>
-            <option value={8192}>8192</option>
-          </select>
-        </label>
-      </div>
     </div>
   )
 }
