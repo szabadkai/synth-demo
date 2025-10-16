@@ -103,6 +103,7 @@ export function App() {
   const layoutOrder = useStore((s: State) => s.layoutOrder)
   const setLayoutOrder = useStore((s: State) => s.setLayoutOrder)
 
+  const resetPatch = useStore((s: State) => s.resetPatch)
   const panelHelpContent = useMemo<Record<PanelHelpId, PanelHelpContent>>(() => ({
     oscilloscope: {
       title: 'Oscilloscope & Signal Shaping',
@@ -341,6 +342,13 @@ export function App() {
         <h2>WebSynth Studio</h2>
         <div className="row">
           <button onClick={initNow}>{engine ? 'Audio Ready' : 'Power On'}</button>
+          <button
+            onClick={() => {
+              resetPatch()
+            }}
+          >
+            Reset Patch
+          </button>
           <button
             onClick={() => {
               setGuideOpen(true)

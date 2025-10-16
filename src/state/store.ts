@@ -53,6 +53,7 @@ export type State = {
   setSamplerFromLibrary: (id: string) => void
   updateCurrentSampler: (changes: Partial<SamplerSettings>) => void
   renameSamplerSample: (id: string, name: string) => void
+  resetPatch: () => void
 }
 
 export const useStore = create<State>()(
@@ -192,6 +193,10 @@ export const useStore = create<State>()(
           nextPatch = { ...state.patch, sampler: nextSampler }
         }
         return { samplerLibrary: nextLibrary, patch: nextPatch }
+      }),
+      resetPatch: () => set((state) => {
+        state.engine?.applyPatch(defaultPatch)
+        return { patch: defaultPatch, samplerLibrary: state.samplerLibrary }
       }),
     }),
     {
