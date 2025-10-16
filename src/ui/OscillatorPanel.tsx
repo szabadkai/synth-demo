@@ -1,18 +1,27 @@
 import React from 'react'
 import { useStore, type State } from '../state/store'
 import { Knob } from './controls/Knob'
-import { defaultPatch } from '../audio-engine/engine'
+import { defaultPatch, type EngineMode } from '../audio-engine/engine'
 import { SamplerControls } from './SamplerControls'
 
 export function OscillatorPanel() {
   const patch = useStore((s: State) => s.patch)
   const updatePatch = useStore((s: State) => s.updatePatch)
   const engineMode = patch.engineMode ?? 'classic'
-  const setEngineMode = (m: 'classic' | 'macro') => updatePatch({ engineMode: m })
+  const setEngineMode = (mode: EngineMode) => updatePatch({ engineMode: mode })
   const setMacro = (changes: Partial<NonNullable<State['patch']['macro']>>) => {
     const base = patch.macro ?? defaultPatch.macro!
     updatePatch({ macro: { ...base, ...changes } })
   }
+
+  React.useEffect(() => {
+    if (
+      engineMode !== 'sampler' &&
+      (patch.osc1.wave === 'sample' || patch.osc2.wave === 'sample')
+    ) {
+      updatePatch({ engineMode: 'sampler' })
+    }
+  }, [engineMode, patch.osc1.wave, patch.osc2.wave, updatePatch])
 
   if (engineMode === 'macro') {
     return (
@@ -21,10 +30,11 @@ export function OscillatorPanel() {
           <div className="label">Mode</div>
           <select
             value={engineMode}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngineMode(e.target.value as any)}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngineMode(e.target.value as EngineMode)}
           >
             <option value="classic">Classic (Osc 1 + Osc 2)</option>
             <option value="macro">Macro (Plaits/MF-like)</option>
+            <option value="sampler">Sampler (one-shot/loop)</option>
           </select>
         </label>
         <label>
@@ -80,16 +90,38 @@ export function OscillatorPanel() {
     )
   }
 
+  if (engineMode === 'sampler') {
+    return (
+      <div className="controls-grid" style={{ gridTemplateColumns: '1fr' }}>
+        <label>
+          <div className="label">Mode</div>
+          <select
+            value={engineMode}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngineMode(e.target.value as EngineMode)}
+          >
+            <option value="classic">Classic (Osc 1 + Osc 2)</option>
+            <option value="macro">Macro (Plaits/MF-like)</option>
+            <option value="sampler">Sampler (one-shot/loop)</option>
+          </select>
+        </label>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <SamplerControls />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="controls-grid">
       <label style={{ gridColumn: '1 / -1' }}>
         <div className="label">Mode</div>
         <select
           value={engineMode}
-          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngineMode(e.target.value as any)}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEngineMode(e.target.value as EngineMode)}
         >
           <option value="classic">Classic (Osc 1 + Osc 2)</option>
           <option value="macro">Macro (Plaits/MF-like)</option>
+          <option value="sampler">Sampler (one-shot/loop)</option>
         </select>
       </label>
       {/* Column headers */}
@@ -110,7 +142,6 @@ export function OscillatorPanel() {
           <option value="sawtooth">Saw</option>
           <option value="triangle">Triangle</option>
           <option value="noise">Noise</option>
-          <option value="sample">Sample</option>
         </select>
       </label>
       <label>
@@ -126,15 +157,8 @@ export function OscillatorPanel() {
           <option value="sawtooth">Saw</option>
           <option value="triangle">Triangle</option>
           <option value="noise">Noise</option>
-          <option value="sample">Sample</option>
         </select>
       </label>
-
-      {(patch.osc1.wave === 'sample' || patch.osc2.wave === 'sample') && (
-        <div style={{ gridColumn: '1 / -1' }}>
-          <SamplerControls />
-        </div>
-      )}
 
       {/* Osc 1 controls row */}
       <div className="osc-knob-row" style={{ gridColumn: '1 / 2' }}>

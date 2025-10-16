@@ -23,6 +23,8 @@ export type SamplerSettings = {
   trimEndSec?: number
 }
 
+export type EngineMode = 'classic' | 'macro' | 'sampler'
+
 export type Patch = {
   osc1: { wave: WaveType; detune: number; finePct?: number }
   osc2: { wave: WaveType; detune: number }
@@ -35,7 +37,7 @@ export type Patch = {
   master: { gain: number }
   sampler: SamplerSettings
   // Macro (Plaits-like) engine
-  engineMode?: 'classic' | 'macro'
+  engineMode?: EngineMode
   macro?: {
     model: MacroModel
     harmonics: number // 0..1
@@ -1117,8 +1119,10 @@ export class SynthEngine {
     oscGain.gain.value = 0
     oscGain.connect(this.filter)
 
+    const engineMode = this.patch.engineMode ?? 'classic'
+
     // Macro engine path
-    if ((this.patch.engineMode ?? 'classic') === 'macro' && this.patch.macro) {
+    if (engineMode === 'macro' && this.patch.macro) {
       const p = this.patch.macro
       let macro: { output: AudioNode; stop: (t: number) => void; pitched?: OscillatorNode[] }
       switch (p.model) {
@@ -1184,24 +1188,85 @@ export class SynthEngine {
       return { stop }
     }
 
+    // Sampler engine path
+    if (engineMode === 'sampler') {
+      const sources: AudioScheduledSourceNode[] = []
+      const samplerSource = this.createSamplerSource(freq, 'osc1')
+      if (samplerSource) {
+        samplerSource.connect(oscGain)
+        sources.push(samplerSource)
+      }
+
+      const subLfoConnections: Array<{ g: GainNode; p: AudioParam }> = []
+      // Optional sub oscillator support in sampler mode
+      if (this.patch.sub.enabled) {
+        const subOsc = this.ctx.createOscillator()
+        subOsc.type = (this.patch.sub.wave || 'square') as OscillatorType
+        const subFreq = freq / Math.pow(2, Math.max(1, Math.min(2, this.patch.sub.octave)))
+        subOsc.frequency.setValueAtTime(subFreq, now)
+        const subGain = this.ctx.createGain()
+        subGain.gain.value = Math.max(0, Math.min(1, this.patch.sub.level))
+        subOsc.connect(subGain)
+        subGain.connect(oscGain)
+        sources.push(subOsc)
+        for (const l of this.lfos) {
+          if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
+            l.gain.connect(subOsc.detune)
+            subLfoConnections.push({ g: l.gain, p: subOsc.detune })
+          }
+        }
+      }
+
+      if (sources.length) {
+        const g = oscGain.gain
+        g.cancelScheduledValues(now)
+        g.setValueAtTime(0, now)
+        g.linearRampToValueAtTime(1, now + Math.max(0.001, env.attack))
+        g.linearRampToValueAtTime(env.sustain, now + env.attack + Math.max(0.001, env.decay))
+
+        for (const s of sources) {
+          if ('start' in s && !(s as any)._autoStarted) (s as any).start()
+        }
+
+        const stop = (releaseTime: number) => {
+          const t = Math.max(this.ctx.currentTime, releaseTime)
+          g.cancelScheduledValues(t)
+          g.setValueAtTime(g.value, t)
+          g.linearRampToValueAtTime(0, t + Math.max(0.001, env.release))
+          for (const s of sources) {
+            if ('stop' in s) (s as any).stop(t + env.release + 0.05)
+          }
+          for (const c of subLfoConnections) {
+            try { c.g.disconnect(c.p) } catch {}
+          }
+        }
+
+        return { stop }
+      }
+      // If no sample source available, fall through to classic engine below
+      for (const c of subLfoConnections) {
+        try { c.g.disconnect(c.p) } catch {}
+      }
+    }
+
     // Sub-mix for two oscillators
-  const sub1 = this.ctx.createGain()
-  const sub2 = this.ctx.createGain()
+    const sub1 = this.ctx.createGain()
+    const sub2 = this.ctx.createGain()
     const mix = Math.max(0, Math.min(1, this.patch.mix))
     sub1.gain.value = 1 - mix
     sub2.gain.value = mix
-  // Normal sum (so we can crossfade with ring product if enabled)
-  const normalSum = this.ctx.createGain()
-  normalSum.gain.value = 1
-  sub1.connect(normalSum)
-  sub2.connect(normalSum)
-  normalSum.connect(oscGain)
+    // Normal sum (so we can crossfade with ring product if enabled)
+    const normalSum = this.ctx.createGain()
+    normalSum.gain.value = 1
+    sub1.connect(normalSum)
+    sub2.connect(normalSum)
+    normalSum.connect(oscGain)
 
-  const sources: AudioScheduledSourceNode[] = []
-  let osc1Node: OscillatorNode | null = null
-  let osc2Node: OscillatorNode | null = null
-  let primarySource: AudioNode | null = null
-  const lfoParamConnections: Array<{ g: GainNode; p: AudioParam }> = []
+    const sources: AudioScheduledSourceNode[] = []
+    let osc1Node: OscillatorNode | null = null
+    let osc2Node: OscillatorNode | null = null
+    let primarySource: AudioNode | null = null
+    const lfoParamConnections: Array<{ g: GainNode; p: AudioParam }> = []
 
     // Oscillator 1 (carrier)
     {
