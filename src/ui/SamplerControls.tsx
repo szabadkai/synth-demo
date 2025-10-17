@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, type State } from '../state/store'
-import { defaultPatch, type SamplerSettings } from '../audio-engine/engine'
+import { DEFAULT_OSCILLATOR_SAMPLER, type SamplerSettings } from '../audio-engine/engine'
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+const SAMPLE_NAME_MAX_CHARS = 10
 const ROOT_NOTE_OPTIONS = Array.from({ length: 61 }, (_v, index) => {
   const midi = 36 + index // C2 upwards
   const name = NOTE_NAMES[midi % 12]
@@ -17,8 +18,27 @@ const makeSamplerId = () => {
   return `sample-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-const ensureSampler = (sampler: State['patch']['sampler'] | undefined) => {
-  const merged = { ...defaultPatch.sampler, ...(sampler ?? {}) }
+const toShortName = (raw: string | null | undefined, fallback: string) => {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return fallback
+  return trimmed.slice(0, SAMPLE_NAME_MAX_CHARS)
+}
+
+const makeRecordingName = () => {
+  const stamp = Math.floor(Date.now() % 1_000_000)
+  const code = stamp.toString(36).toUpperCase().padStart(4, '0')
+  return `REC-${code}`.slice(0, SAMPLE_NAME_MAX_CHARS)
+}
+
+const makeUploadName = (filename: string) => {
+  const base = filename.replace(/\.[^/.]+$/, '')
+  const sanitized = base.replace(/[^A-Za-z0-9_-]/g, '').toUpperCase()
+  if (!sanitized) return 'SAMPLE'
+  return sanitized.slice(0, SAMPLE_NAME_MAX_CHARS)
+}
+
+const ensureSampler = (sampler: SamplerSettings | undefined) => {
+  const merged = { ...DEFAULT_OSCILLATOR_SAMPLER, ...(sampler ?? {}) }
   const duration = typeof merged.durationSec === 'number' && merged.durationSec > 0 ? merged.durationSec : 0
   if (duration === 0) {
     return { ...merged, durationSec: 0, trimStartSec: 0, trimEndSec: 0 }
@@ -46,14 +66,19 @@ const formatTime = (seconds: number) => {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
-export function SamplerControls() {
-  const sampler = useStore((s: State) => s.patch.sampler)
+type SamplerControlsProps = {
+  oscillator?: 'osc1' | 'osc2'
+}
+
+export function SamplerControls({ oscillator = 'osc1' }: SamplerControlsProps) {
+  const sampler = useStore((s: State) => s.patch[oscillator].sampler)
   const samplerLibrary = useStore((s: State) => s.samplerLibrary)
   const saveSamplerSample = useStore((s: State) => s.saveSamplerSample)
   const deleteSamplerSample = useStore((s: State) => s.deleteSamplerSample)
   const setSamplerFromLibrary = useStore((s: State) => s.setSamplerFromLibrary)
   const updateSamplerSettings = useStore((s: State) => s.updateCurrentSampler)
   const renameSamplerSample = useStore((s: State) => s.renameSamplerSample)
+  const playSamplerPreview = useStore((s: State) => s.playSamplerPreview)
   const [error, setError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -133,7 +158,7 @@ export function SamplerControls() {
         const safeDuration = duration > 0 ? duration : 0
         const samplePayload: SamplerSettings = {
           id: makeSamplerId(),
-          name,
+          name: toShortName(name, 'SAMPLE'),
           dataUrl,
           recordedAt: Date.now(),
           durationSec: safeDuration,
@@ -142,12 +167,12 @@ export function SamplerControls() {
           loop: currentSampler.loop,
           rootMidi: currentSampler.rootMidi,
         }
-        saveSamplerSample(samplePayload)
+        saveSamplerSample(oscillator, samplePayload)
       } finally {
         setIsProcessing(false)
       }
     },
-    [currentSampler.loop, currentSampler.rootMidi, decodeSampleDuration, saveSamplerSample],
+    [oscillator, currentSampler.loop, currentSampler.rootMidi, decodeSampleDuration, saveSamplerSample],
   )
 
   const handleRecordedBlob = useCallback(
@@ -200,8 +225,7 @@ export function SamplerControls() {
         chunksRef.current = []
         cleanupStream()
         if (blob.size > 0) {
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-          handleRecordedBlob(blob, `recording-${timestamp}.webm`)
+          handleRecordedBlob(blob, makeRecordingName())
         }
       }
       recorder.start()
@@ -225,7 +249,7 @@ export function SamplerControls() {
       reader.onloadend = () => {
         const result = reader.result
         if (typeof result === 'string') {
-          void ingestSample(result, file.name)
+          void ingestSample(result, makeUploadName(file.name))
         } else {
           setError('Unable to read file')
         }
@@ -286,7 +310,7 @@ export function SamplerControls() {
     const start = Math.max(0, Math.min(valueSec, durationSec))
     const minWindow = 0.005
     const ensuredEnd = Math.max(start + minWindow, trimEndSec)
-    updateSamplerSettings({ trimStartSec: start, trimEndSec: Math.min(ensuredEnd, durationSec) })
+    updateSamplerSettings(oscillator, { trimStartSec: start, trimEndSec: Math.min(ensuredEnd, durationSec) })
   }
 
   const updateTrimEnd = (valueSec: number) => {
@@ -296,7 +320,7 @@ export function SamplerControls() {
     const ensuredStart = Math.min(trimStartSec, end - minWindow)
     const clampedStart = Math.max(0, Math.min(ensuredStart, durationSec))
     const newEnd = Math.min(durationSec, Math.max(end, minWindow))
-    updateSamplerSettings({ trimStartSec: Math.max(clampedStart, 0), trimEndSec: newEnd })
+    updateSamplerSettings(oscillator, { trimStartSec: Math.max(clampedStart, 0), trimEndSec: newEnd })
   }
 
   const handleExport = useCallback((sample: SamplerSettings) => {
@@ -343,18 +367,25 @@ export function SamplerControls() {
     if (!renamingId) return
     const trimmed = renameValue.trim()
     if (!trimmed) return
-    renameSamplerSample(renamingId, trimmed)
+    renameSamplerSample(renamingId, toShortName(trimmed, 'SAMPLE'))
     setRenamingId(null)
     setRenameValue('')
   }, [renamingId, renameValue, renameSamplerSample])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '0 0 8px' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="label">Sampler</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isProcessing}>
             {isProcessing ? 'Loading...' : 'Load Sample'}
+          </button>
+          <button
+            type="button"
+            onClick={() => playSamplerPreview(oscillator)}
+            disabled={!currentSampler.dataUrl || isProcessing}
+          >
+            Play
           </button>
           <button type="button" onClick={recording ? stopRecording : startRecording} disabled={!canRecord || isProcessing}>
             {recording ? 'Stop Recording' : 'Record'}
@@ -362,16 +393,16 @@ export function SamplerControls() {
           <button
             type="button"
             onClick={() => {
-              updateSamplerSettings({
+              updateSamplerSettings(oscillator, {
                 id: null,
-                name: defaultPatch.sampler.name,
+                name: DEFAULT_OSCILLATOR_SAMPLER.name,
                 dataUrl: null,
                 recordedAt: undefined,
                 durationSec: 0,
                 trimStartSec: 0,
                 trimEndSec: 0,
-                loop: defaultPatch.sampler.loop,
-                rootMidi: defaultPatch.sampler.rootMidi,
+                loop: DEFAULT_OSCILLATOR_SAMPLER.loop,
+                rootMidi: DEFAULT_OSCILLATOR_SAMPLER.rootMidi,
               })
               setError(null)
             }}
@@ -409,7 +440,19 @@ export function SamplerControls() {
       <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <span>
           <span className="label" style={{ marginRight: 4 }}>Current</span>
-          <span>{currentSampler.dataUrl ? currentSampler.name : 'No sample loaded'}</span>
+          <span
+            style={{
+              maxWidth: `${SAMPLE_NAME_MAX_CHARS}ch`,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              display: 'inline-block',
+              verticalAlign: 'bottom',
+            }}
+            title={currentSampler.dataUrl ? currentSampler.name : undefined}
+          >
+            {currentSampler.dataUrl ? currentSampler.name : 'No sample loaded'}
+          </span>
         </span>
         {hasSample && (
           <span>
@@ -428,7 +471,7 @@ export function SamplerControls() {
           <span className="label">Root Note</span>
           <select
            value={currentSampler.rootMidi}
-            onChange={(event) => updateSamplerSettings({ rootMidi: Number(event.target.value) })}
+            onChange={(event) => updateSamplerSettings(oscillator, { rootMidi: Number(event.target.value) })}
           >
             {ROOT_NOTE_OPTIONS.map((option) => (
               <option key={option.midi} value={option.midi}>
@@ -441,7 +484,7 @@ export function SamplerControls() {
           <input
             type="checkbox"
             checked={!!currentSampler.loop}
-            onChange={(event) => updateSamplerSettings({ loop: event.target.checked })}
+            onChange={(event) => updateSamplerSettings(oscillator, { loop: event.target.checked })}
           />
           Loop playback
         </label>
@@ -516,9 +559,21 @@ export function SamplerControls() {
                           if (event.key === 'Escape') { event.preventDefault(); cancelRename() }
                         }}
                         autoFocus
+                        maxLength={SAMPLE_NAME_MAX_CHARS}
                       />
                     ) : (
-                      <span style={{ fontWeight: 600 }}>{item.name || 'Sample'}</span>
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          maxWidth: `${SAMPLE_NAME_MAX_CHARS}ch`,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                        title={item.name || 'Sample'}
+                      >
+                        {item.name || 'Sample'}
+                      </span>
                     )}
                     <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                       {formatTime(item.durationSec ?? 0)} {isActive ? '· Active' : ''}
@@ -536,7 +591,7 @@ export function SamplerControls() {
                       </>
                     ) : (
                       <>
-                        <button type="button" onClick={() => setSamplerFromLibrary(item.id!)} disabled={isActive}>
+                        <button type="button" onClick={() => setSamplerFromLibrary(oscillator, item.id!)} disabled={isActive}>
                           {isActive ? 'In Use' : 'Use'}
                         </button>
                         <button

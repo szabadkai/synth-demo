@@ -21,6 +21,7 @@ function LfoRow({ idx }: { idx: 1 | 2 }) {
           <option value="triangle">Triangle</option>
           <option value="square">Square</option>
           <option value="sawtooth">Saw</option>
+          <option value="noise">Noise</option>
         </select>
       </label>
       <label className="lfo-select">

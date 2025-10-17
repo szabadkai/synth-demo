@@ -23,6 +23,7 @@ import { GitHubCorner } from './GitHubCorner'
 import { OnboardingGuide } from './OnboardingGuide'
 import { BuyCoffeeButton } from './BuyCoffeeButton'
 import { OscilloscopeSettings } from './OscilloscopeSettings'
+import { PresetSelector } from './PresetSelector'
 
 const GUIDE_STORAGE_KEY = 'websynth-guide-seen'
 const HELP_PANEL_IDS = ['oscilloscope', 'oscillator', 'effects', 'lfos', 'arp', 'sequencer', 'drum', 'keyboard'] as const
@@ -140,16 +141,16 @@ export function App() {
       ),
     },
     oscillator: {
-      title: 'Oscillator Engine',
+      title: 'ENG Voice Engine',
       body: (
         <div className="module-help">
-          <p>The oscillator panel builds the raw tone. Switch between the classic dual-oscillator stack and the macro voice engine.</p>
+          <p>The engine panel builds the raw tone. Switch between the classic dual-engine stack (ENG1/ENG2) and the macro voice engine.</p>
           <h5>Classic Mode</h5>
           <ul>
-            <li><strong>Mode</strong>: choose Classic to expose Osc 1 and Osc 2 controls; Macro flips to the multi-model engine.</li>
-            <li><strong>Wave</strong>: pick saw, square, triangle, sine, or noise per oscillator.</li>
-            <li><strong>Detune/Fine</strong>: detune Osc 1 in cents for chorus movement; fine tune provides subtle offsets.</li>
-            <li><strong>Mix</strong>: blend Osc 1 against Osc 2 to balance the tone.</li>
+            <li><strong>Mode</strong>: choose Classic to expose ENG1 and ENG2 controls; Macro flips to the multi-model engine.</li>
+            <li><strong>Wave</strong>: pick saw, square, triangle, sine, or noise per engine.</li>
+            <li><strong>Detune/Fine</strong>: detune ENG1 in cents for chorus movement; fine tune provides subtle offsets.</li>
+            <li><strong>Mix</strong>: blend ENG1 against ENG2 to balance the tone.</li>
             <li><strong>FM toggle</strong>: enable frequency modulation, then set <strong>Ratio</strong> for the modulator harmonic and <strong>Amount</strong> for depth.</li>
             <li><strong>Ring toggle</strong>: engage ring modulation and scale its <strong>Amount</strong> for metallic textures.</li>
           </ul>
@@ -202,7 +203,7 @@ export function App() {
           <h5>LFO Controls</h5>
           <ul>
             <li><strong>Enabled</strong>: arm the modulation path for each LFO.</li>
-            <li><strong>Wave</strong>: choose sine, triangle, square, or saw for the modulation shape.</li>
+            <li><strong>Wave</strong>: choose sine, triangle, square, saw, or noise for the modulation shape.</li>
             <li><strong>Dest</strong>: route to pitch, filter, or amp—tie depth to macros or expression for more routings.</li>
             <li><strong>Rate</strong>: set frequency in Hz (0.01–20); syncs with tempo when combined with the transport.</li>
             <li><strong>Amount</strong>: scale modulation depth; automate this with the Sequencer or expression surface for evolving sounds.</li>
@@ -341,6 +342,7 @@ export function App() {
       <header className="header">
         <h2>WebSynth Studio</h2>
         <div className="row">
+          <PresetSelector />
           <button onClick={initNow}>{engine ? 'Audio Ready' : 'Power On'}</button>
           <button
             onClick={() => {

@@ -1,4 +1,5 @@
 import type { ExpressionTarget } from './expressionTargets'
+import { phaseVocoderPitchShift } from './phaseVocoder'
 
 export type WaveType = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'noise' | 'sample'
 
@@ -10,6 +11,8 @@ export type ADSR = {
 }
 
 export type MacroModel = 'va' | 'fold' | 'pluck' | 'supersaw' | 'pwm' | 'fm2op' | 'wavetable' | 'harmonic' | 'chord'
+
+export type LfoWave = Exclude<WaveType, 'sample'>
 
 export type SamplerSettings = {
   id: string | null
@@ -23,11 +26,31 @@ export type SamplerSettings = {
   trimEndSec?: number
 }
 
+export type MacroSettings = {
+  model: MacroModel
+  harmonics: number
+  timbre: number
+  morph: number
+  level: number
+}
+
+export type OscillatorMode = 'analog' | 'macro' | 'sampler'
+
 export type EngineMode = 'classic' | 'macro' | 'sampler'
 
+export type OscillatorConfig = {
+  wave: WaveType
+  detune: number
+  detuneFine?: number
+  octave?: number
+  mode?: OscillatorMode
+  macro?: MacroSettings
+  sampler?: SamplerSettings
+}
+
 export type Patch = {
-  osc1: { wave: WaveType; detune: number; detuneFine?: number; octave?: number }
-  osc2: { wave: WaveType; detune: number }
+  osc1: OscillatorConfig
+  osc2: OscillatorConfig
   mix: number // 0 = osc1 only, 1 = osc2 only
   fm: { enabled: boolean; ratio: number; amount: number } // amount in Hz added to carrier freq
   sub: { enabled: boolean; octave: 1 | 2; level: number; wave?: Exclude<WaveType, 'noise' | 'sample'> }
@@ -49,8 +72,8 @@ export type Patch = {
     delay: { enabled: boolean; time: number; feedback: number; mix: number }
     reverb: { enabled: boolean; size: number; decay: number; mix: number }
   }
-  lfo1?: { enabled: boolean; wave: Exclude<WaveType, 'noise' | 'sample'>; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
-  lfo2?: { enabled: boolean; wave: Exclude<WaveType, 'noise' | 'sample'>; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
+  lfo1?: { enabled: boolean; wave: LfoWave; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
+  lfo2?: { enabled: boolean; wave: LfoWave; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
   arp?: {
     enabled: boolean
     // Free-rate mode
@@ -87,9 +110,52 @@ export type Patch = {
   }
 }
 
+export const DEFAULT_OSCILLATOR_MACRO: MacroSettings = {
+  model: 'va',
+  harmonics: 0.6,
+  timbre: 0.5,
+  morph: 0.5,
+  level: 1.0,
+}
+
+export const DEFAULT_OSCILLATOR_SAMPLER: SamplerSettings = {
+  id: null,
+  name: 'Empty',
+  dataUrl: null,
+  rootMidi: 60,
+  loop: true,
+  recordedAt: undefined,
+  durationSec: 0,
+  trimStartSec: 0,
+  trimEndSec: 0,
+}
+
+const normalizeOscillatorConfig = (osc: OscillatorConfig): OscillatorConfig => ({
+  ...osc,
+  mode: osc.mode ?? 'analog',
+  macro: { ...DEFAULT_OSCILLATOR_MACRO, ...(osc.macro ?? {}) },
+  sampler: { ...DEFAULT_OSCILLATOR_SAMPLER, ...(osc.sampler ?? {}) },
+})
+
 export const defaultPatch: Patch = {
-  osc1: { wave: 'sawtooth', detune: 0, detuneFine: 0, octave: 0 },
-  osc2: { wave: 'square', detune: 0 },
+  osc1: {
+    wave: 'sawtooth',
+    detune: 0,
+    detuneFine: 0,
+    octave: 0,
+    mode: 'analog',
+    macro: { ...DEFAULT_OSCILLATOR_MACRO },
+    sampler: { ...DEFAULT_OSCILLATOR_SAMPLER },
+  },
+  osc2: {
+    wave: 'square',
+    detune: 0,
+    detuneFine: 0,
+    octave: 0,
+    mode: 'analog',
+    macro: { ...DEFAULT_OSCILLATOR_MACRO },
+    sampler: { ...DEFAULT_OSCILLATOR_SAMPLER },
+  },
   mix: 0.0,
   fm: { enabled: false, ratio: 2.0, amount: 0 },
   sub: { enabled: false, octave: 1, level: 0.0, wave: 'square' },
@@ -97,18 +163,9 @@ export const defaultPatch: Patch = {
   filter: { type: 'lowpass', cutoff: 1200, q: 0.8 },
   envelope: { attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3 },
   master: { gain: 0.2 },
-  sampler: {
-    id: null,
-    name: 'Empty',
-    dataUrl: null,
-    rootMidi: 60,
-    loop: true,
-    durationSec: 0,
-    trimStartSec: 0,
-    trimEndSec: 0,
-  },
+  sampler: { ...DEFAULT_OSCILLATOR_SAMPLER },
   engineMode: 'classic',
-  macro: { model: 'va', harmonics: 0.6, timbre: 0.5, morph: 0.5, level: 1.0 },
+  macro: { ...DEFAULT_OSCILLATOR_MACRO },
   effects: {
     delay: { enabled: false, time: 0.25, feedback: 0.3, mix: 0.2 },
     reverb: { enabled: false, size: 0.5, decay: 0.5, mix: 0.25 },
@@ -294,17 +351,32 @@ function createNoiseBuffer(ctx: AudioContext) {
   return buffer
 }
 
+type ActiveVoice = {
+  stop: (t: number) => void
+  osc1Detune?: AudioParam
+  osc2Detune?: AudioParam
+  osc1Mix?: GainNode
+  osc2Mix?: GainNode
+}
+
 export class SynthEngine {
   private ctx: AudioContext
   private master: GainNode
   private filter: BiquadFilterNode
   private analyser: AnalyserNode
   private noiseBuffer?: AudioBuffer
-  private activeVoices = new Map<number, { stop: (t: number) => void; osc1Detune?: AudioParam; osc2Detune?: AudioParam }>()
+  private activeVoices = new Map<number, ActiveVoice>()
   private fxInput: GainNode
   private fxOutput: GainNode
   private currentFxTap: AudioNode | null = null
-  private lfos: Array<{ osc: OscillatorNode; gain: GainNode; dest: 'pitch' | 'filter' | 'amp' | 'none' }>
+  private lfos: Array<{
+    osc: OscillatorNode | null
+    noise: AudioBufferSourceNode | null
+    noiseFilter: BiquadFilterNode | null
+    gain: GainNode
+    dest: 'pitch' | 'filter' | 'amp' | 'none'
+    wave: LfoWave
+  }>
   private expression2D: { active: boolean; x: number; y: number } = { active: false, x: 0.5, y: 0.5 }
   private expressionAxisTargets: Record<ExpressionAxis, ExpressionTarget> = {
     x: defaultPatch.expression!.x,
@@ -315,6 +387,7 @@ export class SynthEngine {
   private samplerBuffer: AudioBuffer | null = null
   private samplerMeta: SamplerSettings = { ...defaultPatch.sampler }
   private samplerLoadToken = 0
+  private samplerPitchCache = new Map<string, AudioBuffer>()
   patch: Patch
 
   // Arpeggiator state
@@ -340,12 +413,12 @@ export class SynthEngine {
     this.filter = this.ctx.createBiquadFilter()
     this.analyser = this.ctx.createAnalyser()
 
-  this.fxInput = this.ctx.createGain()
-  this.fxOutput = this.ctx.createGain()
-  this.filter.connect(this.fxInput)
-  // initialize pass-through
-  this.fxInput.connect(this.fxOutput)
-  this.fxOutput.connect(this.master)
+    this.fxInput = this.ctx.createGain()
+    this.fxOutput = this.ctx.createGain()
+    this.filter.connect(this.fxInput)
+    // initialize pass-through
+    this.fxInput.connect(this.fxOutput)
+    this.fxOutput.connect(this.master)
     // Audio to speakers
     this.master.connect(this.ctx.destination)
     // Scope tap: pre-FX (stable, periodic signal for standing waves)
@@ -364,7 +437,7 @@ export class SynthEngine {
       osc.connect(g)
       // start immediately; routing is handled separately
       osc.start()
-      this.lfos.push({ osc, gain: g, dest: 'none' })
+      this.lfos.push({ osc, noise: null, noiseFilter: null, gain: g, dest: 'none', wave: 'sine' })
     }
 
     this.patch = { ...defaultPatch }
@@ -421,6 +494,7 @@ export class SynthEngine {
     if (!settings.dataUrl) {
       this.samplerBuffer = null
       this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, null)
+      this.samplerPitchCache.clear()
       return
     }
     if (isSameSource && this.samplerBuffer) return
@@ -432,11 +506,13 @@ export class SynthEngine {
       if (token === this.samplerLoadToken) {
         this.samplerBuffer = decoded
         this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, decoded)
+        this.samplerPitchCache.clear()
       }
     } catch (error) {
       if (token === this.samplerLoadToken) {
         this.samplerBuffer = null
         this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, null)
+        this.samplerPitchCache.clear()
       }
       console.warn('Failed to decode sampler buffer', error)
     }
@@ -456,43 +532,160 @@ export class SynthEngine {
     return this.patch.osc2.detune || 0
   }
 
-  private createSamplerSource(freq: number, which: 'osc1' | 'osc2'): AudioBufferSourceNode | null {
+  private mapNoiseLfoCutoff(rateHz: number) {
+    const rate = clampValue(rateHz, 0.01, 20)
+    const hz = clampValue(rate * 12, 0.5, 600)
+    return hz
+  }
+
+  private updateLfoSource(index: number, settings: NonNullable<Patch['lfo1']>) {
+    const node = this.lfos[index]
+    if (!node) return
+    const now = this.ctx.currentTime
+    const wave = settings.wave
+    if (wave === 'noise') {
+      if (!this.noiseBuffer) this.noiseBuffer = createNoiseBuffer(this.ctx)
+      if (node.osc) {
+        try { node.osc.stop(now) } catch {}
+        try { node.osc.disconnect() } catch {}
+        node.osc = null
+      }
+      if (!node.noise) {
+        const noise = this.ctx.createBufferSource()
+        noise.buffer = this.noiseBuffer!
+        noise.loop = true
+        const filter = this.ctx.createBiquadFilter()
+        filter.type = 'lowpass'
+        filter.Q.value = 0.0001
+        noise.connect(filter)
+        filter.connect(node.gain)
+        noise.start()
+        node.noise = noise
+        node.noiseFilter = filter
+      }
+      if (node.noiseFilter) {
+        const cutoff = this.mapNoiseLfoCutoff(settings.rateHz)
+        node.noiseFilter.frequency.setTargetAtTime(cutoff, now, 0.05)
+      }
+    } else {
+      if (!node.osc) {
+        const osc = this.ctx.createOscillator()
+        osc.type = wave as OscillatorType
+        osc.frequency.value = Math.max(0.01, settings.rateHz)
+        osc.connect(node.gain)
+        osc.start()
+        node.osc = osc
+      } else {
+        node.osc.type = wave as OscillatorType
+        node.osc.frequency.setValueAtTime(Math.max(0.01, settings.rateHz), now)
+      }
+      if (node.noise) {
+        try { node.noise.stop(now) } catch {}
+        try { node.noise.disconnect() } catch {}
+        node.noise = null
+      }
+      if (node.noiseFilter) {
+        try { node.noiseFilter.disconnect() } catch {}
+        node.noiseFilter = null
+      }
+    }
+    node.wave = wave
+  }
+
+  private getPitchedSamplerBuffer(pitchRatio: number) {
+    if (!this.samplerBuffer) return null
+    const sampleRate = this.samplerBuffer.sampleRate
+    const startSec = this.samplerMeta.trimStartSec ?? 0
+    const endSec = this.samplerMeta.trimEndSec ?? this.samplerBuffer.duration
+    const clampedStart = clampValue(startSec, 0, this.samplerBuffer.duration)
+    const clampedEnd = clampValue(endSec, clampedStart + 0.005, this.samplerBuffer.duration)
+    const startSample = Math.max(0, Math.floor(clampedStart * sampleRate))
+    const endSample = Math.max(startSample + 1, Math.min(this.samplerBuffer.length, Math.floor(clampedEnd * sampleRate)))
+    const frameLength = endSample - startSample
+    if (frameLength <= 0) return null
+    const id = this.samplerMeta.id ?? 'inline'
+    const sourceKey = `${id}|${this.samplerMeta.dataUrl ?? 'data'}|${startSample}|${endSample}`
+    const ratio = Number.isFinite(pitchRatio) && pitchRatio > 0 ? pitchRatio : 1
+    const ratioKey = ratio.toFixed(6)
+    const cacheKey = `${sourceKey}|${ratioKey}|${sampleRate}|${this.samplerBuffer.numberOfChannels}`
+    const cached = this.samplerPitchCache.get(cacheKey)
+    if (cached) return cached
+
+    const channelCount = this.samplerBuffer.numberOfChannels
+    const channels: Float32Array[] = []
+    for (let ch = 0; ch < channelCount; ch++) {
+      const source = this.samplerBuffer.getChannelData(ch)
+      const segment = source.subarray(startSample, endSample)
+      channels.push(new Float32Array(segment))
+    }
+
+    const shifted = Math.abs(ratio - 1) < 1e-4 ? channels : phaseVocoderPitchShift({ channels, pitchRatio: ratio })
+
+    if (!shifted.length || shifted[0].length === 0) return null
+
+    const buffer = this.ctx.createBuffer(shifted.length, shifted[0].length, sampleRate)
+    for (let ch = 0; ch < shifted.length; ch++) {
+      buffer.copyToChannel(shifted[ch], ch, 0)
+    }
+    this.samplerPitchCache.set(cacheKey, buffer)
+    return buffer
+  }
+
+  private createSamplerSource(
+    freq: number,
+    which: 'osc1' | 'osc2',
+    options: { autoStart?: boolean; allowLoop?: boolean } = {},
+  ): AudioBufferSourceNode | null {
+    const { autoStart = true, allowLoop = true } = options
     if (!this.samplerBuffer) return null
     this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, this.samplerBuffer)
-    const src = this.ctx.createBufferSource()
-    src.buffer = this.samplerBuffer
-    const start = this.samplerMeta.trimStartSec ?? 0
-    const end = this.samplerMeta.trimEndSec ?? this.samplerBuffer.duration
-    const maxWindow = Math.max(0.005, this.samplerBuffer.duration - start)
-    const playbackWindow = clampValue(end - start, 0.005, maxWindow)
-    const loopEnabled = !!this.samplerMeta.loop && playbackWindow > 0.01
-    src.loop = loopEnabled
-    if (loopEnabled) {
-      src.loopStart = start
-      src.loopEnd = start + playbackWindow
-    }
     const baseFreq = this.getSamplerBaseFrequency()
     const detuneCents = this.getDetuneCents(which)
     const detuneRatio = Math.pow(2, detuneCents / 1200)
     const ratio = baseFreq > 0 ? (freq / baseFreq) * detuneRatio : detuneRatio
-    src.playbackRate.setValueAtTime(ratio, this.ctx.currentTime)
+    const pitchedBuffer = this.getPitchedSamplerBuffer(ratio)
+    if (!pitchedBuffer) return null
+    const playbackWindow = pitchedBuffer.duration
+    const loopEnabled = allowLoop && !!this.samplerMeta.loop && playbackWindow > 0.01
+    const src = this.ctx.createBufferSource()
+    src.buffer = pitchedBuffer
+    src.loop = loopEnabled
     if (loopEnabled) {
-      src.start(0, start)
-    } else {
-      src.start(0, start, playbackWindow)
+      src.loopStart = 0
+      src.loopEnd = playbackWindow
     }
-    ;(src as any)._autoStarted = true
+    if (autoStart) {
+      if (loopEnabled) {
+        src.start(0)
+      } else {
+        const duration = Math.max(0.005, playbackWindow)
+        src.start(0, 0, duration)
+      }
+      ;(src as any)._autoStarted = true
+    }
     return src
   }
 
   applyPatch(p: DeepPartial<Patch> = {}, options: { fromExpression?: boolean } = {}) {
     const { fromExpression = false } = options
     const prev = this.patch
+    const incomingOsc1 = (p.osc1 ?? {}) as Partial<OscillatorConfig>
+    const incomingOsc2 = (p.osc2 ?? {}) as Partial<OscillatorConfig>
+
+    const mergedOsc1 = normalizeOscillatorConfig({
+      ...this.patch.osc1,
+      ...incomingOsc1,
+    })
+    const mergedOsc2 = normalizeOscillatorConfig({
+      ...this.patch.osc2,
+      ...incomingOsc2,
+    })
+
     const next: Patch = {
       ...this.patch,
       ...p,
-      osc1: { ...this.patch.osc1, ...(p.osc1 ?? {}) },
-      osc2: { ...this.patch.osc2, ...(p.osc2 ?? {}) },
+      osc1: mergedOsc1,
+      osc2: mergedOsc2,
       fm: { ...this.patch.fm, ...(p.fm ?? {}) },
       sub: { ...this.patch.sub, ...(p.sub ?? {}) },
       ring: { ...this.patch.ring, ...(p.ring ?? {}) },
@@ -502,7 +695,7 @@ export class SynthEngine {
       mix: p.mix != null ? p.mix : this.patch.mix,
       engineMode: p.engineMode ?? this.patch.engineMode ?? 'classic',
       sampler: { ...(this.patch.sampler ?? defaultPatch.sampler), ...(p.sampler ?? {}) },
-      macro: { ...(this.patch.macro ?? defaultPatch.macro!), ...(p.macro ?? {}) },
+      macro: { ...(this.patch.macro ?? DEFAULT_OSCILLATOR_MACRO), ...(p.macro ?? {}) },
       effects: {
         ...(this.patch.effects ?? defaultPatch.effects!),
         ...(p.effects ?? {}),
@@ -516,12 +709,28 @@ export class SynthEngine {
       } as Patch['sequencer'],
       expression: { ...(this.patch.expression ?? defaultPatch.expression!), ...(p.expression ?? {}) },
     }
+
     this.patch = next
+
     if (p.sampler !== undefined) {
       void this.updateSamplerBuffer(next.sampler)
+    } else if (p.osc1?.sampler !== undefined) {
+      void this.updateSamplerBuffer(next.osc1.sampler ?? defaultPatch.sampler)
+    } else if (p.osc2?.sampler !== undefined) {
+      void this.updateSamplerBuffer(next.osc2.sampler ?? defaultPatch.sampler)
     }
 
     this.configureExpressionRouting(next.expression)
+
+    if (p.mix !== undefined && next.mix !== prev.mix) {
+      const level1 = clampValue(1 - next.mix, 0, 1)
+      const level2 = clampValue(next.mix, 0, 1)
+      const now = this.ctx.currentTime
+      for (const voice of this.activeVoices.values()) {
+        if (voice.osc1Mix) voice.osc1Mix.gain.setTargetAtTime(level1, now, 0.01)
+        if (voice.osc2Mix) voice.osc2Mix.gain.setTargetAtTime(level2, now, 0.01)
+      }
+    }
 
     // Master gain smoothing
     if (next.master.gain !== prev.master.gain) {
@@ -543,8 +752,7 @@ export class SynthEngine {
       for (let i = 0; i < this.lfos.length; i++) {
         const node = this.lfos[i]
         const pLfo = lfos[i]
-        node.osc.type = (pLfo.wave as OscillatorType)
-        node.osc.frequency.setValueAtTime(Math.max(0.01, pLfo.rateHz), this.ctx.currentTime)
+        this.updateLfoSource(i, pLfo)
         // Disconnect prior routing
         try { node.gain.disconnect() } catch {}
         node.dest = 'none'
@@ -595,6 +803,41 @@ export class SynthEngine {
     }
 
     if (this.expression2D.active && !fromExpression) this.applyExpression2D()
+  }
+
+  async previewSampler(target: 'osc1' | 'osc2') {
+    const sampler = this.patch[target].sampler ?? defaultPatch.sampler
+    if (!sampler?.dataUrl) return
+    await this.updateSamplerBuffer(sampler)
+    if (!this.samplerBuffer) return
+    const midi = Number.isFinite(sampler.rootMidi) ? sampler.rootMidi! : 60
+    const freq = 440 * Math.pow(2, (midi - 69) / 12)
+    const source = this.createSamplerSource(freq, target, { autoStart: false, allowLoop: false })
+    if (!source) return
+    const gain = this.ctx.createGain()
+    gain.gain.value = 0.8
+    source.connect(gain)
+    gain.connect(this.master)
+    const now = this.ctx.currentTime
+    const duration = Math.max(0.05, Math.min(source.buffer?.duration ?? 0.5, 5))
+    let started = false
+    try {
+      source.start(now)
+      started = true
+      source.stop(now + duration)
+    } catch (error) {
+      if (!started) {
+        try { source.disconnect() } catch {}
+        try { gain.disconnect() } catch {}
+        return
+      }
+      throw error
+    }
+    const cleanup = () => {
+      try { source.disconnect() } catch {}
+      try { gain.disconnect() } catch {}
+    }
+    source.addEventListener('ended', cleanup, { once: true })
   }
 
   private buildFxChain() {
@@ -773,7 +1016,31 @@ export class SynthEngine {
     return curve
   }
 
-  private createMacroSuperSaw(freq: number, p: NonNullable<Patch['macro']>) {
+  private buildMacroVoice(freq: number, settings: MacroSettings) {
+    switch (settings.model) {
+      case 'fold':
+        return this.createMacroFold(freq, settings)
+      case 'pluck':
+        return this.createMacroPluck(freq, settings)
+      case 'supersaw':
+        return this.createMacroSuperSaw(freq, settings)
+      case 'pwm':
+        return this.createMacroPWM(freq, settings)
+      case 'fm2op':
+        return this.createMacroFM2Op(freq, settings)
+      case 'wavetable':
+        return this.createMacroWavetable(freq, settings)
+      case 'harmonic':
+        return this.createMacroHarmonic(freq, settings)
+      case 'chord':
+        return this.createMacroChord(freq, settings)
+      case 'va':
+      default:
+        return this.createMacroVA(freq, settings)
+    }
+  }
+
+  private createMacroSuperSaw(freq: number, p: MacroSettings) {
     const NUM = 6
     const mix = this.ctx.createGain()
     const tone = this.ctx.createBiquadFilter()
@@ -814,7 +1081,7 @@ export class SynthEngine {
     }
   }
 
-  private createMacroWavetable(freq: number, p: NonNullable<Patch['macro']>) {
+  private createMacroWavetable(freq: number, p: MacroSettings) {
     // Blend between basic waves: sine -> triangle -> saw -> square
     const shapes: OscillatorType[] = ['sine', 'triangle', 'sawtooth', 'square']
     const seg = Math.min(3, Math.max(0, Math.floor(p.morph * 3.00001)))
@@ -847,7 +1114,7 @@ export class SynthEngine {
     }
   }
 
-  private createMacroHarmonic(freq: number, p: NonNullable<Patch['macro']>) {
+  private createMacroHarmonic(freq: number, p: MacroSettings) {
     // Additive stack with controllable partial count and tilt
     const maxPartials = 16
     const minPartials = 2
@@ -881,7 +1148,7 @@ export class SynthEngine {
     }
   }
 
-  private createMacroChord(freq: number, p: NonNullable<Patch['macro']>) {
+  private createMacroChord(freq: number, p: MacroSettings) {
     // Stack a chord; choose set by harmonics, inversion/spread by morph
     const CHORDS: number[][] = [
       [0, 4, 7],            // Major
@@ -928,7 +1195,7 @@ export class SynthEngine {
     }
   }
 
-  private createMacroPWM(freq: number, p: NonNullable<Patch['macro']>) {
+  private createMacroPWM(freq: number, p: MacroSettings) {
     // Generate PWM by offsetting a saw and passing through a steep tanh shaper
     const saw = this.ctx.createOscillator()
     saw.type = 'sawtooth'
@@ -976,7 +1243,7 @@ export class SynthEngine {
     }
   }
 
-  private createMacroFM2Op(freq: number, p: NonNullable<Patch['macro']>) {
+  private createMacroFM2Op(freq: number, p: MacroSettings) {
     // Simple 2-operator FM: sine modulator -> carrier frequency
     const carrier = this.ctx.createOscillator()
     carrier.type = 'sine'
@@ -1012,7 +1279,7 @@ export class SynthEngine {
     }
   }
 
-  private createMacroVA(freq: number, p: NonNullable<Patch['macro']>) {
+  private createMacroVA(freq: number, p: MacroSettings) {
     const oscSaw = this.ctx.createOscillator()
     const oscTri = this.ctx.createOscillator()
     oscSaw.type = 'sawtooth'
@@ -1044,7 +1311,7 @@ export class SynthEngine {
     }
   }
 
-  private createMacroFold(freq: number, p: NonNullable<Patch['macro']>) {
+  private createMacroFold(freq: number, p: MacroSettings) {
     const osc = this.ctx.createOscillator()
     osc.type = 'sine'
     osc.frequency.value = freq
@@ -1073,7 +1340,7 @@ export class SynthEngine {
     }
   }
 
-  private createMacroPluck(freq: number, p: NonNullable<Patch['macro']>) {
+  private createMacroPluck(freq: number, p: MacroSettings) {
     const out = this.ctx.createGain()
     const burst = this.ctx.createBufferSource()
     const len = Math.floor(this.ctx.sampleRate * 0.02)
@@ -1129,134 +1396,9 @@ export class SynthEngine {
     const osc1Freq = freq * Math.pow(2, osc1Octave)
 
     const engineMode = this.patch.engineMode ?? 'classic'
-
-    // Macro engine path
-    if (engineMode === 'macro' && this.patch.macro) {
-      const p = this.patch.macro
-      let macro: { output: AudioNode; stop: (t: number) => void; pitched?: OscillatorNode[] }
-      switch (p.model) {
-        case 'fold':
-          macro = this.createMacroFold(freq, p)
-          break
-        case 'pluck':
-          macro = this.createMacroPluck(freq, p)
-          break
-        case 'supersaw':
-          macro = this.createMacroSuperSaw(freq, p)
-          break
-        case 'pwm':
-          macro = this.createMacroPWM(freq, p)
-          break
-        case 'fm2op':
-          macro = this.createMacroFM2Op(freq, p)
-          break
-        case 'wavetable':
-          macro = this.createMacroWavetable(freq, p)
-          break
-        case 'harmonic':
-          macro = this.createMacroHarmonic(freq, p)
-          break
-        case 'chord':
-          macro = this.createMacroChord(freq, p)
-          break
-        case 'va':
-        default:
-          macro = this.createMacroVA(freq, p)
-          break
-      }
-      macro.output.connect(oscGain)
-
-      // Connect LFOs to any pitched oscillators
-      const lfoParamConnections: Array<{ g: GainNode; p: AudioParam }> = []
-      if (macro.pitched && macro.pitched.length) {
-        for (const osc of macro.pitched) {
-          for (const l of this.lfos) {
-            if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-              l.gain.connect(osc.detune)
-              lfoParamConnections.push({ g: l.gain, p: osc.detune })
-            }
-          }
-        }
-      }
-
-      // ADSR envelope
-      const g = oscGain.gain
-      g.cancelScheduledValues(now)
-      g.setValueAtTime(0, now)
-      g.linearRampToValueAtTime(voiceGainScale, now + Math.max(0.001, env.attack))
-      g.linearRampToValueAtTime(env.sustain * voiceGainScale, now + env.attack + Math.max(0.001, env.decay))
-
-      const stop = (releaseTime: number) => {
-        const t = Math.max(this.ctx.currentTime, releaseTime)
-        g.cancelScheduledValues(t)
-        g.setValueAtTime(g.value, t)
-        g.linearRampToValueAtTime(0, t + Math.max(0.001, env.release))
-        macro.stop(t + env.release + 0.05)
-        for (const c of lfoParamConnections) { try { c.g.disconnect(c.p) } catch {} }
-      }
-      return { stop }
-    }
-
-    // Sampler engine path
-    if (engineMode === 'sampler') {
-      const sources: AudioScheduledSourceNode[] = []
-      const samplerSource = this.createSamplerSource(osc1Freq, 'osc1')
-      if (samplerSource) {
-        samplerSource.connect(oscGain)
-        sources.push(samplerSource)
-      }
-
-      const subLfoConnections: Array<{ g: GainNode; p: AudioParam }> = []
-      // Optional sub oscillator support in sampler mode
-      if (this.patch.sub.enabled) {
-        const subOsc = this.ctx.createOscillator()
-        subOsc.type = (this.patch.sub.wave || 'square') as OscillatorType
-        const subFreq = freq / Math.pow(2, Math.max(1, Math.min(2, this.patch.sub.octave)))
-        subOsc.frequency.setValueAtTime(subFreq, now)
-        const subGain = this.ctx.createGain()
-        subGain.gain.value = Math.max(0, Math.min(1, this.patch.sub.level))
-        subOsc.connect(subGain)
-        subGain.connect(oscGain)
-        sources.push(subOsc)
-        for (const l of this.lfos) {
-          if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-            l.gain.connect(subOsc.detune)
-            subLfoConnections.push({ g: l.gain, p: subOsc.detune })
-          }
-        }
-      }
-
-      if (sources.length) {
-        const g = oscGain.gain
-        g.cancelScheduledValues(now)
-        g.setValueAtTime(0, now)
-        g.linearRampToValueAtTime(voiceGainScale, now + Math.max(0.001, env.attack))
-        g.linearRampToValueAtTime(env.sustain * voiceGainScale, now + env.attack + Math.max(0.001, env.decay))
-
-        for (const s of sources) {
-          if ('start' in s && !(s as any)._autoStarted) (s as any).start()
-        }
-
-        const stop = (releaseTime: number) => {
-          const t = Math.max(this.ctx.currentTime, releaseTime)
-          g.cancelScheduledValues(t)
-          g.setValueAtTime(g.value, t)
-          g.linearRampToValueAtTime(0, t + Math.max(0.001, env.release))
-          for (const s of sources) {
-            if ('stop' in s) (s as any).stop(t + env.release + 0.05)
-          }
-          for (const c of subLfoConnections) {
-            try { c.g.disconnect(c.p) } catch {}
-          }
-        }
-
-        return { stop }
-      }
-      // If no sample source available, fall through to classic engine below
-      for (const c of subLfoConnections) {
-        try { c.g.disconnect(c.p) } catch {}
-      }
-    }
+    const fallbackMode = (mode: EngineMode) => (mode === 'macro' ? 'macro' : mode === 'sampler' ? 'sampler' : 'analog')
+    const osc1Mode = this.patch.osc1.mode ?? fallbackMode(engineMode)
+    const osc2Mode = this.patch.osc2.mode ?? fallbackMode(engineMode)
 
     // Sub-mix for two oscillators
     const sub1 = this.ctx.createGain()
@@ -1276,54 +1418,78 @@ export class SynthEngine {
     let osc2Node: OscillatorNode | null = null
     let primarySource: AudioNode | null = null
     const lfoParamConnections: Array<{ g: GainNode; p: AudioParam }> = []
+    const macroVoices: Array<{ output: AudioNode; stop: (t: number) => void; pitched?: OscillatorNode[] }> = []
 
     // Oscillator 1 (carrier)
     {
-      let s1: OscillatorNode | AudioBufferSourceNode | null = null
-      if (this.patch.osc1.wave === 'noise') {
-        const src = this.ctx.createBufferSource()
-        src.buffer = this.noiseBuffer!
-        src.loop = true
-        s1 = src
-      } else if (this.patch.osc1.wave === 'sample') {
-        s1 = this.createSamplerSource(osc1Freq, 'osc1')
+      if (osc1Mode === 'macro') {
+        const macroSettings = this.patch.osc1.macro ?? this.patch.macro ?? DEFAULT_OSCILLATOR_MACRO
+        const macro = this.buildMacroVoice(osc1Freq, macroSettings)
+        macro.output.connect(sub1)
+        macroVoices.push(macro)
+        if (!primarySource) primarySource = macro.output
+        if (macro.pitched && macro.pitched.length) {
+          for (const osc of macro.pitched) {
+            for (const l of this.lfos) {
+              if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
+                l.gain.connect(osc.detune)
+                lfoParamConnections.push({ g: l.gain, p: osc.detune })
+              }
+            }
+          }
+        }
+      } else if (osc1Mode === 'sampler') {
+        const sample = this.createSamplerSource(osc1Freq, 'osc1')
+        if (sample) {
+          sample.connect(sub1)
+          sources.push(sample)
+          primarySource = sample
+        }
       } else {
-        const osc = this.ctx.createOscillator()
-        osc.type = this.patch.osc1.wave as OscillatorType
-        osc.frequency.setValueAtTime(osc1Freq, now)
-        const fine = this.patch.osc1.detuneFine ?? 0
-        osc.detune.value = (this.patch.osc1.detune || 0) + fine
-        s1 = osc
-        osc1Node = osc
-      }
+        let s1: OscillatorNode | AudioBufferSourceNode | null = null
+        if (this.patch.osc1.wave === 'noise') {
+          const src = this.ctx.createBufferSource()
+          src.buffer = this.noiseBuffer!
+          src.loop = true
+          s1 = src
+        } else if (this.patch.osc1.wave === 'sample') {
+          s1 = this.createSamplerSource(osc1Freq, 'osc1')
+        } else {
+          const osc = this.ctx.createOscillator()
+          osc.type = this.patch.osc1.wave as OscillatorType
+          osc.frequency.setValueAtTime(osc1Freq, now)
+          const fine = this.patch.osc1.detuneFine ?? 0
+          osc.detune.value = (this.patch.osc1.detune || 0) + fine
+          s1 = osc
+          osc1Node = osc
+        }
 
-      if (s1) {
-        s1.connect(sub1)
-        sources.push(s1)
-        primarySource = s1
-      }
+        if (s1) {
+          s1.connect(sub1)
+          sources.push(s1)
+          primarySource = s1
+        }
 
-      // FM: use osc2 as modulator on carrier frequency (if carrier supports frequency param)
-      if (s1 && this.patch.fm.enabled && 'frequency' in (s1 as any)) {
-        const carrier = s1 as OscillatorNode
-        const mod = this.ctx.createOscillator()
-        mod.type = this.patch.osc2.wave as OscillatorType
-        const ratio = Math.max(0.01, this.patch.fm.ratio || 1)
-        mod.frequency.setValueAtTime(freq * ratio, now)
-        mod.detune.value = this.patch.osc2.detune || 0
-        const modGain = this.ctx.createGain()
-        modGain.gain.value = Math.max(0, this.patch.fm.amount || 0) // Hz
-        mod.connect(modGain)
-        modGain.connect(carrier.frequency)
-        sources.push(mod)
-      }
+        if (s1 && this.patch.fm.enabled && 'frequency' in (s1 as any)) {
+          const carrier = s1 as OscillatorNode
+          const mod = this.ctx.createOscillator()
+          mod.type = this.patch.osc2.wave as OscillatorType
+          const ratio = Math.max(0.01, this.patch.fm.ratio || 1)
+          mod.frequency.setValueAtTime(freq * ratio, now)
+          mod.detune.value = this.patch.osc2.detune || 0
+          const modGain = this.ctx.createGain()
+          modGain.gain.value = Math.max(0, this.patch.fm.amount || 0)
+          mod.connect(modGain)
+          modGain.connect(carrier.frequency)
+          sources.push(mod)
+        }
 
-      // LFOs to pitch (detune in cents)
-      if (s1 && 'detune' in (s1 as any)) {
-        for (const l of this.lfos) {
-          if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-            l.gain.connect((s1 as OscillatorNode).detune)
-            lfoParamConnections.push({ g: l.gain, p: (s1 as OscillatorNode).detune })
+        if (s1 && 'detune' in (s1 as any)) {
+          for (const l of this.lfos) {
+            if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
+              l.gain.connect((s1 as OscillatorNode).detune)
+              lfoParamConnections.push({ g: l.gain, p: (s1 as OscillatorNode).detune })
+            }
           }
         }
       }
@@ -1331,54 +1497,75 @@ export class SynthEngine {
 
     // Oscillator 2
     {
-      let s2: OscillatorNode | AudioBufferSourceNode | null = null
-      if (this.patch.osc2.wave === 'noise') {
-        const src = this.ctx.createBufferSource()
-        src.buffer = this.noiseBuffer!
-        src.loop = true
-        s2 = src
-      } else if (this.patch.osc2.wave === 'sample') {
-        s2 = this.createSamplerSource(freq, 'osc2')
+      if (osc2Mode === 'macro') {
+        const macroSettings = this.patch.osc2.macro ?? this.patch.macro ?? DEFAULT_OSCILLATOR_MACRO
+        const macro = this.buildMacroVoice(freq, macroSettings)
+        macro.output.connect(sub2)
+        macroVoices.push(macro)
+        if (macro.pitched && macro.pitched.length) {
+          for (const osc of macro.pitched) {
+            for (const l of this.lfos) {
+              if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
+                l.gain.connect(osc.detune)
+                lfoParamConnections.push({ g: l.gain, p: osc.detune })
+              }
+            }
+          }
+        }
+      } else if (osc2Mode === 'sampler') {
+        const sample = this.createSamplerSource(freq, 'osc2')
+        if (sample) {
+          sample.connect(sub2)
+          sources.push(sample)
+        }
       } else {
-        const osc = this.ctx.createOscillator()
-        osc.type = this.patch.osc2.wave as OscillatorType
-        osc.frequency.setValueAtTime(freq, now)
-        osc.detune.value = this.patch.osc2.detune
-        s2 = osc
-        osc2Node = osc
-      }
+        let s2: OscillatorNode | AudioBufferSourceNode | null = null
+        if (this.patch.osc2.wave === 'noise') {
+          const src = this.ctx.createBufferSource()
+          src.buffer = this.noiseBuffer!
+          src.loop = true
+          s2 = src
+        } else {
+          const osc = this.ctx.createOscillator()
+          osc.type = this.patch.osc2.wave as OscillatorType
+          osc.frequency.setValueAtTime(freq, now)
+          osc.detune.value = this.patch.osc2.detune
+          s2 = osc
+          osc2Node = osc
+        }
 
-      if (s2) {
-        s2.connect(sub2)
-        sources.push(s2)
-      }
+        if (s2) {
+          s2.connect(sub2)
+          sources.push(s2)
+        }
 
-      // Ring modulation: multiply s1 by s2 and crossfade with normal mix
-      if (this.patch.ring.enabled && primarySource && s2) {
-        const ringVca = this.ctx.createGain()
-        ringVca.gain.value = 0 // remove DC offset so gain comes purely from modulator
-        primarySource.connect(ringVca)
-        // depth: modulator -> gain (audio-rate modulation)
-        const depth = this.ctx.createGain()
-        depth.gain.value = 1
-        s2.connect(depth)
-        depth.connect(ringVca.gain)
+        // Ring modulation: multiply s1 by s2 and crossfade with normal mix
+        if (this.patch.ring.enabled && primarySource && s2) {
+          const ringVca = this.ctx.createGain()
+          ringVca.gain.value = 0 // remove DC offset so gain comes purely from modulator
+          primarySource.connect(ringVca)
+          // depth: modulator -> gain (audio-rate modulation)
+          const depth = this.ctx.createGain()
+          depth.gain.value = 1
+          s2.connect(depth)
+          depth.connect(ringVca.gain)
 
-        // Crossfade between normal sum and ring product
-        const amt = Math.max(0, Math.min(1, this.patch.ring.amount))
-        normalSum.gain.value = 1 - amt
-        const ringGain = this.ctx.createGain()
-        ringGain.gain.value = amt
-        ringVca.connect(ringGain)
-        ringGain.connect(oscGain)
-      }
+          // Crossfade between normal sum and ring product
+          const amt = Math.max(0, Math.min(1, this.patch.ring.amount))
+          normalSum.gain.value = 1 - amt
+          const ringGain = this.ctx.createGain()
+          ringGain.gain.value = amt
+          ringVca.connect(ringGain)
+          ringGain.connect(oscGain)
+        }
 
-      // LFOs to pitch (detune) for osc2 if applicable
-      if (s2 && 'detune' in (s2 as any)) {
-        for (const l of this.lfos) {
-          if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-            l.gain.connect((s2 as OscillatorNode).detune)
-            lfoParamConnections.push({ g: l.gain, p: (s2 as OscillatorNode).detune })
+        // LFOs to pitch (detune) for osc2 if applicable
+        if (s2 && 'detune' in (s2 as any)) {
+          for (const l of this.lfos) {
+            if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
+              l.gain.connect((s2 as OscillatorNode).detune)
+              lfoParamConnections.push({ g: l.gain, p: (s2 as OscillatorNode).detune })
+            }
           }
         }
       }
@@ -1423,6 +1610,9 @@ export class SynthEngine {
       for (const s of sources) {
         if ('stop' in s) (s as any).stop(t + env.release + 0.05)
       }
+      for (const macro of macroVoices) {
+        try { macro.stop(t + env.release + 0.05) } catch {}
+      }
       // Disconnect LFO param connections for this voice
       for (const c of lfoParamConnections) {
         try { c.g.disconnect(c.p) } catch {}
@@ -1430,7 +1620,11 @@ export class SynthEngine {
     }
 
     // Expose detune params for live updates (only if oscillators, not noise)
-    const voiceHandle: { stop: (t: number) => void; osc1Detune?: AudioParam; osc2Detune?: AudioParam } = { stop }
+    const voiceHandle: ActiveVoice = {
+      stop,
+      osc1Mix: sub1,
+      osc2Mix: sub2,
+    }
     if (osc1Node) voiceHandle.osc1Detune = osc1Node.detune
     if (osc2Node) voiceHandle.osc2Detune = osc2Node.detune
 

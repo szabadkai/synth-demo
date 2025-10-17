@@ -27,7 +27,7 @@ export function FilterPanel() {
           <Knob label="Cutoff" min={40} max={8000} step={10} value={patch.filter.cutoff} onChange={(v) => handleFilterChange({ cutoff: v })} formatValue={(v) => `${Math.round(v)} Hz`} />
         </div>
         <div className="knob-group">
-          <Knob label="Resonance" min={0.1} max={10} step={0.1} value={patch.filter.q} onChange={(v) => handleFilterChange({ q: v })} formatValue={(v) => v.toFixed(2)} />
+          <Knob label="Resonance" min={0} max={10} step={0.1} value={patch.filter.q} onChange={(v) => handleFilterChange({ q: v })} formatValue={(v) => v.toFixed(2)} />
         </div>
         <div className="knob-group">
           <Knob label="Master" min={0} max={1} step={0.01} value={masterGain} onChange={(v) => updatePatch({ master: { ...patch.master, gain: v } })} formatValue={(v) => v.toFixed(2)} />

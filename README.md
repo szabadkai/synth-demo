@@ -8,9 +8,10 @@ WebSynth Studio is a browser-based analogue-style synthesizer built with React, 
 
 ## Highlights
 
-- **Dual oscillator engine** with sub, ring-mod, macro engines, and flexible mixer.
+- **Dual ENG voice engine** (ENG1/ENG2) with sub, ring-mod, macro engines, and a flexible mixer.
 - **Filter, envelopes, and effects** including delay and convolution reverb.
 - **Modulation system** with two assignable LFOs, arpeggiator, step sequencer, and macro controls.
+- **Curated presets** surfaced in the top bar that cover pads, basses, macro textures, and motion studies.
 - **Configurable XY expression**: engage CapsLock and glide on the trackpad to control any two parameters (filter cutoff, oscillator detune, FM amount, envelope times, macro sliders, LFO rate/depth, etc.).
 - **Patch workflow**: import/export JSON patches, curate presets under `src/patches/`, and persist the working sound via local storage.
 - **Responsive keyboard**: MIDI-like computer keyboard mapping, on-screen keys, pointer glissando, and octave shifts.

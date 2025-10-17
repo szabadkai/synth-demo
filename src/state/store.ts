@@ -1,6 +1,34 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { SynthEngine, Patch, SamplerSettings, defaultPatch } from '../audio-engine/engine'
+import {
+  SynthEngine,
+  defaultPatch,
+  DEFAULT_OSCILLATOR_MACRO,
+  DEFAULT_OSCILLATOR_SAMPLER,
+} from '../audio-engine/engine'
+import type { Patch, SamplerSettings, EngineMode, OscillatorMode } from '../audio-engine/engine'
+
+const normalizeOscillator = (osc: Patch['osc1']): Patch['osc1'] => ({
+  ...osc,
+  mode: osc.mode ?? 'analog',
+  macro: { ...DEFAULT_OSCILLATOR_MACRO, ...(osc.macro ?? {}) },
+  sampler: { ...DEFAULT_OSCILLATOR_SAMPLER, ...(osc.sampler ?? {}) },
+})
+
+const deriveEngineMode = (
+  osc1Mode: OscillatorMode,
+  osc2Mode: OscillatorMode,
+): EngineMode => {
+  if (osc1Mode === 'sampler' || osc2Mode === 'sampler') return 'sampler'
+  if (osc1Mode === 'macro' || osc2Mode === 'macro') return 'macro'
+  return 'classic'
+}
+
+const selectMacroSource = (state: Patch): NonNullable<Patch['macro']> => {
+  if (state.osc1.mode === 'macro' && state.osc1.macro) return state.osc1.macro
+  if (state.osc2.mode === 'macro' && state.osc2.macro) return state.osc2.macro
+  return state.macro ?? DEFAULT_OSCILLATOR_MACRO
+}
 
 export type MidiDeviceInfo = {
   id: string
@@ -48,11 +76,12 @@ export type State = {
   setMidiSelectedInput: (id: string | null) => void
   setMidiActiveNotes: (notes: number[]) => void
   setOscilloscopeFftSize: (size: 1024 | 2048 | 4096 | 8192) => void
-  saveSamplerSample: (sample: SamplerSettings) => void
+  saveSamplerSample: (target: 'osc1' | 'osc2', sample: SamplerSettings) => void
   deleteSamplerSample: (id: string) => void
-  setSamplerFromLibrary: (id: string) => void
-  updateCurrentSampler: (changes: Partial<SamplerSettings>) => void
+  setSamplerFromLibrary: (target: 'osc1' | 'osc2', id: string) => void
+  updateCurrentSampler: (target: 'osc1' | 'osc2', changes: Partial<SamplerSettings>) => void
   renameSamplerSample: (id: string, name: string) => void
+  playSamplerPreview: (target: 'osc1' | 'osc2') => void
   resetPatch: () => void
 }
 
@@ -77,29 +106,51 @@ export const useStore = create<State>()(
       },
       setEngine: (e) => set({ engine: e }),
       updatePatch: (p) => {
+        const prevPatch = get().patch
         const next = {
-          ...get().patch,
+          ...prevPatch,
           ...p,
-          osc1: { ...get().patch.osc1, ...(p as any).osc1 },
-          osc2: { ...get().patch.osc2, ...(p as any).osc2 },
-          fm: { ...get().patch.fm, ...(p as any).fm },
-          sub: { ...get().patch.sub, ...(p as any).sub },
-          ring: { ...get().patch.ring, ...(p as any).ring },
-          filter: { ...get().patch.filter, ...(p as any).filter },
-          envelope: { ...get().patch.envelope, ...(p as any).envelope },
-          master: { ...get().patch.master, ...(p as any).master },
-          sampler: { ...get().patch.sampler, ...(p as any).sampler },
-          macro: { ...((get().patch as any).macro || defaultPatch.macro), ...(p as any).macro },
-          effects: { ...((get().patch as any).effects || defaultPatch.effects), ...(p as any).effects },
-          lfo1: { ...((get().patch as any).lfo1 || defaultPatch.lfo1), ...(p as any).lfo1 },
-          lfo2: { ...((get().patch as any).lfo2 || defaultPatch.lfo2), ...(p as any).lfo2 },
-          arp: { ...((get().patch as any).arp || defaultPatch.arp), ...(p as any).arp },
-          sequencer: { ...((get().patch as any).sequencer || defaultPatch.sequencer), ...(p as any).sequencer },
-          mix: (p as any).mix != null ? (p as any).mix : get().patch.mix,
-          expression: { ...((get().patch as any).expression || defaultPatch.expression), ...(p as any).expression },
+          osc1: { ...prevPatch.osc1, ...(p as any).osc1 },
+          osc2: { ...prevPatch.osc2, ...(p as any).osc2 },
+          fm: { ...prevPatch.fm, ...(p as any).fm },
+          sub: { ...prevPatch.sub, ...(p as any).sub },
+          ring: { ...prevPatch.ring, ...(p as any).ring },
+          filter: { ...prevPatch.filter, ...(p as any).filter },
+          envelope: { ...prevPatch.envelope, ...(p as any).envelope },
+          master: { ...prevPatch.master, ...(p as any).master },
+          sampler: { ...prevPatch.sampler, ...(p as any).sampler },
+          macro: { ...((prevPatch as any).macro || defaultPatch.macro), ...(p as any).macro },
+          effects: { ...((prevPatch as any).effects || defaultPatch.effects), ...(p as any).effects },
+          lfo1: { ...((prevPatch as any).lfo1 || defaultPatch.lfo1), ...(p as any).lfo1 },
+          lfo2: { ...((prevPatch as any).lfo2 || defaultPatch.lfo2), ...(p as any).lfo2 },
+          arp: { ...((prevPatch as any).arp || defaultPatch.arp), ...(p as any).arp },
+          sequencer: { ...((prevPatch as any).sequencer || defaultPatch.sequencer), ...(p as any).sequencer },
+          mix: (p as any).mix != null ? (p as any).mix : prevPatch.mix,
+          expression: { ...((prevPatch as any).expression || defaultPatch.expression), ...(p as any).expression },
         }
+        next.osc1 = normalizeOscillator(next.osc1)
+        next.osc2 = normalizeOscillator(next.osc2)
+
+        const requestedEngineMode = p.engineMode
+        const derivedEngineMode = requestedEngineMode
+          ?? deriveEngineMode(next.osc1.mode ?? 'analog', next.osc2.mode ?? 'analog')
+        next.engineMode = derivedEngineMode
+
+        const enginePatch: Partial<Patch> = { ...p }
+        if (requestedEngineMode !== undefined || (prevPatch.engineMode ?? 'classic') !== derivedEngineMode) {
+          enginePatch.engineMode = derivedEngineMode
+        }
+
+        const macroSource = selectMacroSource(next)
+        const normalizedMacro = { ...DEFAULT_OSCILLATOR_MACRO, ...(macroSource ?? {}) }
+        next.macro = normalizedMacro
+
+        if (derivedEngineMode === 'macro' || p.macro !== undefined || (p as any).osc1?.macro !== undefined || (p as any).osc2?.macro !== undefined) {
+          enginePatch.macro = normalizedMacro
+        }
+
         // Apply only the delta to the engine to avoid heavy reconfiguration on unrelated tweaks
-        get().engine?.applyPatch(p)
+        get().engine?.applyPatch(enginePatch)
         set({ patch: next })
       },
       setLayoutOrder: (ids) => set({ layoutOrder: ids }),
@@ -129,6 +180,8 @@ export const useStore = create<State>()(
           mix: (obj as any).mix != null ? (obj as any).mix : get().patch.mix,
           expression: { ...((get().patch as any).expression || defaultPatch.expression), ...(obj as any).expression },
         }
+        merged.osc1 = normalizeOscillator(merged.osc1)
+        merged.osc2 = normalizeOscillator(merged.osc2)
         get().engine?.applyPatch(merged)
         set({ patch: merged })
       },
@@ -140,41 +193,93 @@ export const useStore = create<State>()(
       setMidiSelectedInput: (id) => set((state) => ({ midi: { ...state.midi, selectedInputId: id } })),
       setMidiActiveNotes: (notes) => set((state) => ({ midi: { ...state.midi, activeNotes: notes } })),
       setOscilloscopeFftSize: (size) => set((state) => ({ oscilloscope: { fftSize: size } })),
-      saveSamplerSample: (sample) => set((state) => {
+      saveSamplerSample: (target, sample) => set((state) => {
         const id = sample.id ?? `sample-${Date.now()}`
-        const sanitized: SamplerSettings = { ...defaultPatch.sampler, ...sample, id }
+        const sanitized: SamplerSettings = { ...DEFAULT_OSCILLATOR_SAMPLER, ...sample, id }
         const nextLibrary = state.samplerLibrary.filter((s) => s.id !== id).concat(sanitized)
-        state.engine?.applyPatch({ sampler: sanitized })
+        const nextPatch: Patch = {
+          ...state.patch,
+          [target]: normalizeOscillator({
+            ...state.patch[target],
+            mode: 'sampler',
+            sampler: sanitized,
+          }),
+        }
+        const enginePatch: Partial<Patch> = {
+          [target]: { mode: 'sampler', sampler: sanitized } as Patch['osc1'],
+        }
+        nextPatch.sampler = sanitized
+        enginePatch.sampler = sanitized
+        state.engine?.applyPatch(enginePatch)
         return {
           samplerLibrary: nextLibrary,
-          patch: { ...state.patch, sampler: sanitized },
+          patch: nextPatch,
         }
       }),
       deleteSamplerSample: (id) => set((state) => {
         const nextLibrary = state.samplerLibrary.filter((s) => s.id !== id)
-        let nextPatch = state.patch
-        if (state.patch.sampler.id === id) {
-          const fallback = { ...defaultPatch.sampler }
-          state.engine?.applyPatch({ sampler: fallback })
-          nextPatch = { ...state.patch, sampler: fallback }
+        const nextPatch: Patch = { ...state.patch }
+        const enginePatch: Partial<Patch> = {}
+        ;(['osc1', 'osc2'] as const).forEach((key) => {
+          if (nextPatch[key].sampler?.id === id) {
+            const fallback = { ...DEFAULT_OSCILLATOR_SAMPLER }
+            nextPatch[key] = normalizeOscillator({
+              ...nextPatch[key],
+              sampler: fallback,
+            })
+            ;(enginePatch as any)[key] = { sampler: fallback }
+          }
+        })
+        if (nextPatch.sampler?.id === id) {
+          const fallback = { ...DEFAULT_OSCILLATOR_SAMPLER }
+          nextPatch.sampler = fallback
+          ;(enginePatch as any).sampler = fallback
+        }
+        if (Object.keys(enginePatch).length > 0) {
+          state.engine?.applyPatch(enginePatch)
         }
         return { samplerLibrary: nextLibrary, patch: nextPatch }
       }),
-      setSamplerFromLibrary: (id) => set((state) => {
+      setSamplerFromLibrary: (target, id) => set((state) => {
         const found = state.samplerLibrary.find((s) => s.id === id)
         if (!found) return {}
-        const sample = { ...defaultPatch.sampler, ...found }
-        state.engine?.applyPatch({ sampler: sample })
-        return { patch: { ...state.patch, sampler: sample } }
+        const sample = { ...DEFAULT_OSCILLATOR_SAMPLER, ...found }
+        const nextPatch: Patch = {
+          ...state.patch,
+          [target]: normalizeOscillator({
+            ...state.patch[target],
+            mode: 'sampler',
+            sampler: sample,
+          }),
+        }
+        const enginePatch: Partial<Patch> = {
+          [target]: { mode: 'sampler', sampler: sample } as Patch['osc1'],
+        }
+        nextPatch.sampler = sample
+        enginePatch.sampler = sample
+        state.engine?.applyPatch(enginePatch)
+        return { patch: nextPatch }
       }),
-      updateCurrentSampler: (changes) => set((state) => {
-        const current = { ...defaultPatch.sampler, ...(state.patch.sampler ?? {}) }
+      updateCurrentSampler: (target, changes) => set((state) => {
+        const current = { ...DEFAULT_OSCILLATOR_SAMPLER, ...(state.patch[target].sampler ?? {}) }
         const nextSampler = { ...current, ...changes }
-        state.engine?.applyPatch({ sampler: nextSampler })
+        const nextPatch: Patch = {
+          ...state.patch,
+          [target]: normalizeOscillator({
+            ...state.patch[target],
+            sampler: nextSampler,
+          }),
+        }
+        const enginePatch: Partial<Patch> = {
+          [target]: { sampler: nextSampler } as Patch['osc1'],
+        }
+        nextPatch.sampler = nextSampler
+        enginePatch.sampler = nextSampler
+        state.engine?.applyPatch(enginePatch)
         const nextLibrary = nextSampler.id
           ? state.samplerLibrary.map((item) => (item.id === nextSampler.id ? { ...item, ...changes } : item))
           : state.samplerLibrary
-        return { patch: { ...state.patch, sampler: nextSampler }, samplerLibrary: nextLibrary }
+        return { patch: nextPatch, samplerLibrary: nextLibrary }
       }),
       renameSamplerSample: (id, name) => set((state) => {
         const trimmed = name.trim()
@@ -186,14 +291,33 @@ export const useStore = create<State>()(
           return { ...item, name: trimmed }
         })
         if (!changed) return {}
-        let nextPatch = state.patch
-        if (state.patch.sampler.id === id) {
-          const nextSampler = { ...state.patch.sampler, name: trimmed }
-          state.engine?.applyPatch({ sampler: nextSampler })
-          nextPatch = { ...state.patch, sampler: nextSampler }
+        const nextPatch: Patch = { ...state.patch }
+        const enginePatch: Partial<Patch> = {}
+        ;(['osc1', 'osc2'] as const).forEach((key) => {
+          if (nextPatch[key].sampler?.id === id) {
+            const updated = { ...nextPatch[key].sampler, name: trimmed }
+            nextPatch[key] = normalizeOscillator({
+              ...nextPatch[key],
+              sampler: updated,
+            })
+            ;(enginePatch as any)[key] = { sampler: updated }
+          }
+        })
+        if (nextPatch.sampler?.id === id) {
+          const updated = { ...nextPatch.sampler, name: trimmed }
+          nextPatch.sampler = updated
+          ;(enginePatch as any).sampler = updated
+        }
+        if (Object.keys(enginePatch).length > 0) {
+          state.engine?.applyPatch(enginePatch)
         }
         return { samplerLibrary: nextLibrary, patch: nextPatch }
       }),
+      playSamplerPreview: (target) => {
+        const engine = get().engine
+        if (!engine) return
+        void engine.previewSampler(target)
+      },
       resetPatch: () => set((state) => {
         state.engine?.applyPatch(defaultPatch)
         return { patch: defaultPatch, samplerLibrary: state.samplerLibrary }

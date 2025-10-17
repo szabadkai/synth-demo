@@ -20,8 +20,8 @@ const guideSections: Array<{
     title: 'Dashboard Basics',
     points: [
       'Each panel can be dragged by the ⋮⋮ handle to personalise your layout.',
-      'Use the Oscilloscope panel to visualise how oscillator, filter, and envelope tweaks shape the signal.',
-      'Dive into Oscillator, Filter, Envelope, and Effects panels to sculpt tone, dynamics, and ambience.',
+      'Use the Oscilloscope panel to visualise how the engines, filter, and envelope tweaks shape the signal.',
+      'Dive into the Engine panel (ENG1/ENG2), plus Filter, Envelope, and Effects modules to sculpt tone, dynamics, and ambience.',
     ],
   },
   {
@@ -51,7 +51,7 @@ const guideSections: Array<{
   {
     title: 'Patch Workflow',
     points: [
-      'Browse built-in presets from Settings → Patches to explore starting points for new sounds.',
+      'Browse the top-bar Preset menu or Settings → Patches to explore curated starting points.',
       'Export your patch as JSON to share, import saved patches, or reset to the init patch at any time.',
       'Use Clear Local if you ever need to wipe cached patches after upgrading the app.',
     ],

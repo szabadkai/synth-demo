@@ -60,7 +60,7 @@ body {
 .buy-coffee {
   position: fixed;
   bottom: 16px;
-  right: 20px;
+  right: 76px;
   z-index: 20;
   display: inline-flex;
   align-items: center;
@@ -126,7 +126,7 @@ body {
 .buy-coffee.collapsed {
   position: fixed;
   bottom: 16px;
-  right: 20px;
+  right: 76px;
 }
 
 .buy-coffee-icon {
@@ -458,7 +458,7 @@ select, input[type="number"], input[type="text"] {
   transform: rotate(180deg);
 }
 
-.preset-selector-popover {  position: absolute; top: calc(100% + 8px); right: 0; display: grid; gap: 0; max-height: 320px; width: 320px; padding: 0; border-radius: 8px; background: black; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35); overflow-y: auto; z-index: 40; }
+.preset-selector-popover { position: absolute; top: calc(100% + 8px); right: 0; display: grid; gap: 0; max-height: 320px; width: 320px; padding: 0; border-radius: 8px; background: rgba(18, 22, 32, 0.65); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35); overflow-y: auto; z-index: 40; }
 
 .preset-selector-group { display: block; }
 
