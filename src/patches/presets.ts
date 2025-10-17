@@ -25,6 +25,9 @@ const ensureEffects = (patch: Patch): NonNullable<Patch['effects']> => {
   return patch.effects!
 }
 
+const ensureTrailingSlash = (value: string): string => (value.endsWith('/') ? value : `${value}/`)
+const ASSET_BASE_URL = ensureTrailingSlash(import.meta.env.BASE_URL ?? '/')
+
 const makePreset = (
   id: string,
   name: string,
@@ -35,7 +38,7 @@ const makePreset = (
   const patch = clonePatch()
   mutate(patch)
   const tags = options.tags ?? []
-  const image = options.image ?? `/presets/${id}.png`
+  const image = options.image ?? `${ASSET_BASE_URL}presets/${id}.png`
   return { id, name, description, tags, image, patch }
 }
 
