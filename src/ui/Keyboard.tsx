@@ -38,10 +38,15 @@ const OFFSET_TO_LABEL: Record<number, string> = Object.fromEntries(
 export function Keyboard() {
   const engine = useStore((s: State) => s.engine)
   const midiActive = useStore((s: State) => s.midi.activeNotes)
-  const [activeLocal, setActiveLocal] = useState<Set<number>>(() => new Set())
+  const [activeLocal, setActiveLocal] = useState<Set<number>>(() => new Set<number>())
   const [baseMidi, setBaseMidi] = useState(60) // C4 by default
   // Track active pointers -> midi for multi-touch + gliss
   const pointerToMidi = useRef<Map<number, number>>(new Map())
+  const activeLocalRef = useRef(activeLocal)
+
+  useEffect(() => {
+    activeLocalRef.current = activeLocal
+  }, [activeLocal])
 
   const active = useMemo(() => {
     const next = new Set(activeLocal)
@@ -53,12 +58,12 @@ export function Keyboard() {
 
   const noteOn = (midi: number) => {
     engine?.noteOn(midi)
-    setActiveLocal((prev: Set<number>) => new Set(prev).add(midi))
+    setActiveLocal((prev: Set<number>) => new Set<number>(prev).add(midi))
   }
   const noteOff = (midi: number) => {
     engine?.noteOff(midi)
     setActiveLocal((prev: Set<number>) => {
-      const next = new Set(prev)
+      const next = new Set<number>(prev)
       next.delete(midi)
       return next
     })
@@ -68,9 +73,35 @@ export function Keyboard() {
     // map to relative semitone offsets from baseMidi
     const down = new Set<string>()
     const normalizeKey = (key: string) => (key.length === 1 ? key.toLowerCase() : key)
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      if (target.isContentEditable) return true
+      const tag = target.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+    }
+    const releaseActive = () => {
+      const seen = new Set<number>()
+      pointerToMidi.current.forEach((midi) => {
+        if (seen.has(midi)) return
+        if (engine) engine.noteOff(midi)
+        seen.add(midi)
+      })
+      pointerToMidi.current.clear()
+      activeLocalRef.current.forEach((midi) => {
+        if (seen.has(midi)) return
+        if (engine) engine.noteOff(midi)
+        seen.add(midi)
+      })
+      if (seen.size > 0 || activeLocalRef.current.size > 0) {
+        setActiveLocal(new Set<number>())
+        activeLocalRef.current = new Set<number>()
+      }
+      down.clear()
+    }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return
       const key = normalizeKey(e.key)
+      if (isEditableTarget(e.target)) return
       // octave shift
       if (key === 'z') {
         setBaseMidi((m: number) => Math.max(24, m - 12))
@@ -83,6 +114,8 @@ export function Keyboard() {
       const off = REL_MAP[key]
       const midi = off != null ? baseMidi + off : undefined
       if (midi != null && !down.has(key)) {
+        e.preventDefault()
+        e.stopPropagation()
         down.add(key)
         noteOn(midi)
       }
@@ -96,11 +129,24 @@ export function Keyboard() {
         noteOff(midi)
       }
     }
+    const onBlur = () => {
+      releaseActive()
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        releaseActive()
+      }
+    }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      releaseActive()
     }
   }, [engine, baseMidi])
 

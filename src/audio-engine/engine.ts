@@ -184,7 +184,7 @@ export const defaultPatch: Patch = {
     length: 16,
     steps: Array.from({ length: 16 }, () => ({ on: false, offset: 0, velocity: 1 })),
   },
-  expression: { x: 'filter.cutoff', y: 'master.gain' },
+  expression: { x: 'osc1.detune', y: 'filter.cutoff' },
 }
 
 type ExpressionTargetDefinition = {
@@ -886,7 +886,7 @@ export class SynthEngine {
   }
 
   private configureExpressionRouting(expression = this.patch.expression ?? defaultPatch.expression!) {
-    const fallback = defaultPatch.expression ?? { x: 'filter.cutoff', y: 'master.gain' }
+    const fallback = defaultPatch.expression ?? { x: 'osc1.detune', y: 'filter.cutoff' }
     for (const axis of EXPRESSION_AXES) {
       const requested = expression?.[axis] ?? fallback[axis]
       const supported = EXPRESSION_RUNTIME_TARGETS[requested] ? requested : fallback[axis]
