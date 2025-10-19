@@ -477,6 +477,114 @@ const macroVoices: PresetGroup = {
         patch.master.gain = 0.18
       }, { tags: ['macro', 'texture'] },
     ),
+    makePreset(
+      'dirichlet-glow',
+      'Dirichlet Glow',
+      'New Dirichlet pulse macro blended with a VA pad for lyrical keys.',
+      (patch) => {
+        patch.engineMode = 'macro'
+        patch.osc1.mode = 'macro'
+        patch.osc1.macro = {
+          ...(patch.osc1.macro ?? defaultPatch.osc1.macro!),
+          model: 'dirichlet',
+          harmonics: 0.78,
+          timbre: 0.42,
+          morph: 0.6,
+          level: 1,
+        }
+        patch.osc2.mode = 'macro'
+        patch.osc2.macro = {
+          ...(patch.osc2.macro ?? defaultPatch.osc2.macro!),
+          model: 'va',
+          harmonics: 0.5,
+          timbre: 0.4,
+          morph: 0.38,
+          level: 0.58,
+        }
+        patch.mix = 0.55
+        patch.filter.type = 'bandpass'
+        patch.filter.cutoff = 1350
+        patch.filter.q = 1.2
+        patch.envelope.attack = 0.06
+        patch.envelope.decay = 0.4
+        patch.envelope.sustain = 0.62
+        patch.envelope.release = 0.95
+        patch.lfo1 = {
+          ...(patch.lfo1 ?? defaultPatch.lfo1!),
+          enabled: true,
+          wave: 'sine',
+          dest: 'filter',
+          rateHz: 0.65,
+          amount: 0.36,
+        }
+        patch.lfo2 = {
+          ...(patch.lfo2 ?? defaultPatch.lfo2!),
+          enabled: true,
+          wave: 'triangle',
+          dest: 'amp',
+          rateHz: 3.2,
+          amount: 0.08,
+        }
+        const effects = ensureEffects(patch)
+        effects.delay = { enabled: true, time: 0.32, feedback: 0.26, mix: 0.24 }
+        effects.reverb = { enabled: true, size: 0.68, decay: 0.9, mix: 0.33 }
+        patch.master.gain = 0.2
+      }, { tags: ['macro', 'dirichlet', 'keys'] },
+    ),
+    makePreset(
+      'vowel-wash',
+      'Vowel Wash',
+      'Phase-aligned formant engine for choir-like swells and evolving vowels.',
+      (patch) => {
+        patch.engineMode = 'macro'
+        patch.osc1.mode = 'macro'
+        patch.osc1.macro = {
+          ...(patch.osc1.macro ?? defaultPatch.osc1.macro!),
+          model: 'formant',
+          harmonics: 0.52,
+          timbre: 0.58,
+          morph: 0.72,
+          level: 1,
+        }
+        patch.osc2.mode = 'macro'
+        patch.osc2.macro = {
+          ...(patch.osc2.macro ?? defaultPatch.osc2.macro!),
+          model: 'harmonic',
+          harmonics: 0.34,
+          timbre: 0.66,
+          morph: 0.5,
+          level: 0.5,
+        }
+        patch.mix = 0.48
+        patch.filter.type = 'lowpass'
+        patch.filter.cutoff = 820
+        patch.filter.q = 0.9
+        patch.envelope.attack = 0.8
+        patch.envelope.decay = 1.1
+        patch.envelope.sustain = 0.82
+        patch.envelope.release = 2.8
+        patch.lfo1 = {
+          ...(patch.lfo1 ?? defaultPatch.lfo1!),
+          enabled: true,
+          wave: 'sine',
+          dest: 'filter',
+          rateHz: 0.18,
+          amount: 0.48,
+        }
+        patch.lfo2 = {
+          ...(patch.lfo2 ?? defaultPatch.lfo2!),
+          enabled: true,
+          wave: 'sine',
+          dest: 'pitch',
+          rateHz: 0.12,
+          amount: 0.05,
+        }
+        const effects = ensureEffects(patch)
+        effects.delay = { enabled: true, time: 0.48, feedback: 0.38, mix: 0.26 }
+        effects.reverb = { enabled: true, size: 0.9, decay: 1.8, mix: 0.42 }
+        patch.master.gain = 0.18
+      }, { tags: ['macro', 'formant', 'pad'] },
+    ),
   ],
 }
 

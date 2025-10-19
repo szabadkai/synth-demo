@@ -10,7 +10,18 @@ export type ADSR = {
   release: number
 }
 
-export type MacroModel = 'va' | 'fold' | 'pluck' | 'supersaw' | 'pwm' | 'fm2op' | 'wavetable' | 'harmonic' | 'chord'
+export type MacroModel =
+  | 'va'
+  | 'fold'
+  | 'pluck'
+  | 'supersaw'
+  | 'pwm'
+  | 'fm2op'
+  | 'wavetable'
+  | 'harmonic'
+  | 'chord'
+  | 'dirichlet'
+  | 'formant'
 
 export type LfoWave = Exclude<WaveType, 'sample'>
 
@@ -1075,6 +1086,10 @@ export class SynthEngine {
         return this.createMacroHarmonic(freq, settings)
       case 'chord':
         return this.createMacroChord(freq, settings)
+      case 'dirichlet':
+        return this.createMacroDirichletPulse(freq, settings)
+      case 'formant':
+        return this.createMacroFormant(freq, settings)
       case 'va':
       default:
         return this.createMacroVA(freq, settings)
@@ -1119,6 +1134,53 @@ export class SynthEngine {
       output: out as AudioNode,
       stop: (t: number) => voices.forEach(({ osc }) => osc.stop(t)),
       pitched: voices.map(v => v.osc),
+    }
+  }
+
+  private createMacroDirichletPulse(freq: number, p: MacroSettings) {
+    const osc = this.ctx.createOscillator()
+    osc.frequency.value = freq
+
+    const minPartials = 8
+    const maxPartials = 64
+    const partialCount = Math.max(minPartials, Math.round(minPartials + p.harmonics * (maxPartials - minPartials)))
+    const width = Math.min(0.92, Math.max(0.08, 0.08 + p.timbre * 0.84))
+    const phaseShift = (p.morph - 0.5) * Math.PI * 2
+
+    const real = new Float32Array(partialCount + 1)
+    const imag = new Float32Array(partialCount + 1)
+
+    real[0] = 0
+    for (let n = 1; n <= partialCount; n++) {
+      const harmonic = n
+      const baseAmp = (2 / (harmonic * Math.PI)) * Math.sin(harmonic * Math.PI * width)
+      const x = harmonic / (partialCount + 1)
+      const window = x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x)
+      const amp = baseAmp * window
+      if (!Number.isFinite(amp) || Math.abs(amp) < 1e-6) continue
+      const phase = phaseShift * harmonic
+      real[harmonic] = amp * Math.cos(phase)
+      imag[harmonic] = amp * Math.sin(phase)
+    }
+
+    const wave = this.ctx.createPeriodicWave(real, imag, { disableNormalization: false })
+    osc.setPeriodicWave(wave)
+
+    const tone = this.ctx.createBiquadFilter()
+    tone.type = 'lowpass'
+    const spectralReach = Math.max(freq * 2, freq * Math.min(partialCount + 2, 40))
+    tone.frequency.value = Math.min(this.ctx.sampleRate * 0.48, spectralReach)
+    tone.Q.value = Math.max(0.35, 0.7 + (0.5 - width) * 0.6)
+
+    const out = this.ctx.createGain()
+    out.gain.value = p.level
+
+    osc.connect(tone).connect(out)
+    osc.start()
+    return {
+      output: out as AudioNode,
+      stop: (t: number) => osc.stop(t),
+      pitched: [osc],
     }
   }
 
@@ -1186,6 +1248,88 @@ export class SynthEngine {
       output: out as AudioNode,
       stop: (tStop: number) => { for (const o of pitched) o.stop(tStop) },
       pitched,
+    }
+  }
+
+  private createMacroFormant(freq: number, p: MacroSettings) {
+    const source = this.ctx.createOscillator()
+    source.type = 'sawtooth'
+    source.frequency.value = freq
+
+    const pre = this.ctx.createGain()
+    pre.gain.value = 1
+    source.connect(pre)
+
+    const mix = this.ctx.createGain()
+    mix.gain.value = 1
+
+    const vowelSets = [
+      { ratios: [1.0, 2.6, 4.9], widths: [0.22, 0.18, 0.28], gains: [1.0, 0.7, 0.45] },
+      { ratios: [0.9, 2.1, 3.5], widths: [0.28, 0.22, 0.32], gains: [1.0, 0.65, 0.55] },
+      { ratios: [1.3, 2.8, 4.2], widths: [0.2, 0.16, 0.24], gains: [0.9, 0.75, 0.5] },
+      { ratios: [0.8, 1.6, 2.8], widths: [0.32, 0.26, 0.36], gains: [1.05, 0.6, 0.55] },
+    ] as const
+
+    const setPosition = p.morph * (vowelSets.length - 1)
+    const setIndex = Math.floor(setPosition)
+    const nextIndex = Math.min(vowelSets.length - 1, setIndex + 1)
+    const blend = setPosition - setIndex
+    const setA = vowelSets[setIndex] ?? vowelSets[0]
+    const setB = vowelSets[nextIndex]
+
+    const ratioScale = 0.8 + p.harmonics * 1.4
+    const resonanceBoost = 0.6 + p.timbre * 2.4
+    const safetyNyquist = this.ctx.sampleRate * 0.48
+    const formantCount = setA.ratios.length
+
+    for (let i = 0; i < formantCount; i++) {
+      const ratioA = setA.ratios[i]
+      const ratioB = setB.ratios[i]
+      const widthA = setA.widths[i]
+      const widthB = setB.widths[i]
+      const gainA = setA.gains[i]
+      const gainB = setB.gains[i]
+
+      const ratio = (ratioA + (ratioB - ratioA) * blend) * ratioScale
+      const width = Math.max(0.05, widthA + (widthB - widthA) * blend)
+      const gain = gainA + (gainB - gainA) * blend
+
+      const center = Math.min(safetyNyquist, Math.max(60, freq * ratio))
+      const filter = this.ctx.createBiquadFilter()
+      filter.type = 'bandpass'
+      filter.frequency.value = center
+      const q = Math.max(0.5, Math.min(30, (1 / width) * resonanceBoost))
+      filter.Q.value = q
+
+      const g = this.ctx.createGain()
+      g.gain.value = (gain / formantCount) * (1 / Math.sqrt(q))
+
+      pre.connect(filter)
+      filter.connect(g).connect(mix)
+    }
+
+    const highpass = this.ctx.createBiquadFilter()
+    highpass.type = 'highpass'
+    highpass.frequency.value = Math.max(40, freq * 0.5)
+    highpass.Q.value = 0.7
+
+    const body = this.ctx.createBiquadFilter()
+    body.type = 'lowpass'
+    body.frequency.value = Math.min(safetyNyquist, 3000 + p.harmonics * 14000)
+    body.Q.value = 0.7 + p.timbre * 0.6
+
+    mix.connect(highpass).connect(body)
+
+    const out = this.ctx.createGain()
+    out.gain.value = p.level
+    body.connect(out)
+
+    source.start()
+
+    return {
+      output: out as AudioNode,
+      stop: (t: number) => source.stop(t),
+      pitched: [source],
     }
   }
 

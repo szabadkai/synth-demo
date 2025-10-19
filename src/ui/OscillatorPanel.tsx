@@ -129,7 +129,7 @@ export function OscillatorPanel() {
                 value={macro.model ?? 'va'}
                 onChange={(event) => setMacro(which, { model: event.target.value as NonNullable<OscConfig['macro']>['model'] })}
               >
-                {['va', 'fold', 'pluck', 'supersaw', 'pwm', 'fm2op', 'wavetable', 'harmonic', 'chord'].map((model) => (
+                {['va', 'fold', 'pluck', 'supersaw', 'pwm', 'fm2op', 'wavetable', 'harmonic', 'chord', 'dirichlet', 'formant'].map((model) => (
                   <option key={model} value={model}>{model.toUpperCase()}</option>
                 ))}
               </select>
