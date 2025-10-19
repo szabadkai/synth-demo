@@ -7,6 +7,7 @@ type Props = {
   step?: number
   size?: number
   label?: string
+  hint?: string
   formatValue?: (value: number) => string
   onChange: (v: number) => void
   disabled?: boolean
@@ -20,6 +21,7 @@ export function Knob({
   step = 0.01,
   size = 56,
   label,
+  hint,
   formatValue,
   onChange,
   disabled = false,
@@ -85,6 +87,7 @@ export function Knob({
         pointerEvents: disabled ? 'none' : 'auto',
         width: size,
       }}
+      title={hint}
     >
       <svg
         width={size}
@@ -99,6 +102,7 @@ export function Knob({
         aria-valuemax={max}
         aria-valuenow={value}
         aria-valuetext={formattedValue}
+        aria-description={hint}
         tabIndex={disabled ? -1 : 0}
         style={{ cursor: disabled ? 'default' : 'ns-resize', outline: active ? '1px solid var(--accent)' : 'none', borderRadius: 8 }}
       >

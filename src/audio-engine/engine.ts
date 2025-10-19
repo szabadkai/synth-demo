@@ -1539,7 +1539,9 @@ export class SynthEngine {
     const delay = this.ctx.createDelay(1.0)
     delay.delayTime.value = periodSec
     const feedback = this.ctx.createGain()
-    feedback.gain.value = 0.85 + p.harmonics * 0.14
+    const harmonicPush = 0.78 + p.harmonics * 0.2 // keep base resonance musical
+    const freqLoss = Math.max(0.8, 1 - freq * 0.0009) // higher pitches need more loss
+    feedback.gain.value = Math.min(0.96, harmonicPush * freqLoss)
     const damp = this.ctx.createBiquadFilter()
     damp.type = 'lowpass'
     damp.frequency.value = 1000 + p.timbre * 8000
