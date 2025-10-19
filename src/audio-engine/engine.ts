@@ -195,6 +195,44 @@ type ExpressionTargetDefinition = {
 
 const ensureFinite = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback)
 
+type ManagedSourceNode = AudioScheduledSourceNode & {
+  _autoStarted?: boolean
+  _started?: boolean
+  _managedLifecycleAttached?: boolean
+}
+
+const ensureManagedSource = <T extends AudioScheduledSourceNode>(source: T): T & ManagedSourceNode => {
+  const managed = source as T & ManagedSourceNode
+  if (!managed._managedLifecycleAttached) {
+    managed._managedLifecycleAttached = true
+    const handleEnded = () => {
+      managed._started = false
+    }
+    if (typeof managed.addEventListener === 'function') {
+      managed.addEventListener('ended', handleEnded as EventListener)
+    } else {
+      const previous = (managed as any).onended
+      ;(managed as any).onended = (event: Event) => {
+        handleEnded()
+        if (typeof previous === 'function') previous.call(managed, event)
+      }
+    }
+  }
+  if (managed._started == null) managed._started = !!managed._autoStarted
+  return managed
+}
+
+const markSourceStarted = (source: AudioScheduledSourceNode) => {
+  const managed = ensureManagedSource(source)
+  managed._started = true
+}
+
+const markSourceAutoStarted = (source: AudioScheduledSourceNode) => {
+  const managed = ensureManagedSource(source)
+  managed._autoStarted = true
+  managed._started = true
+}
+
 const getLfoPatch = (engine: SynthEngine, which: 'lfo1' | 'lfo2') => engine.patch[which] ?? defaultPatch[which]!
 
 const getMacroPatch = (engine: SynthEngine) => engine.patch.macro ?? defaultPatch.macro!
@@ -647,7 +685,7 @@ export class SynthEngine {
     if (!pitchedBuffer) return null
     const playbackWindow = pitchedBuffer.duration
     const loopEnabled = allowLoop && !!this.samplerMeta.loop && playbackWindow > 0.01
-    const src = this.ctx.createBufferSource()
+    const src = ensureManagedSource(this.ctx.createBufferSource())
     src.buffer = pitchedBuffer
     src.loop = loopEnabled
     if (loopEnabled) {
@@ -661,7 +699,7 @@ export class SynthEngine {
         const duration = Math.max(0.005, playbackWindow)
         src.start(0, 0, duration)
       }
-      ;(src as any)._autoStarted = true
+      markSourceAutoStarted(src)
     }
     return src
   }
@@ -812,8 +850,9 @@ export class SynthEngine {
     if (!this.samplerBuffer) return
     const midi = Number.isFinite(sampler.rootMidi) ? sampler.rootMidi! : 60
     const freq = 440 * Math.pow(2, (midi - 69) / 12)
-    const source = this.createSamplerSource(freq, target, { autoStart: false, allowLoop: false })
-    if (!source) return
+    const created = this.createSamplerSource(freq, target, { autoStart: false, allowLoop: false })
+    if (!created) return
+    const source = ensureManagedSource(created)
     const gain = this.ctx.createGain()
     gain.gain.value = 0.8
     source.connect(gain)
@@ -824,7 +863,9 @@ export class SynthEngine {
     try {
       source.start(now)
       started = true
+      markSourceStarted(source)
       source.stop(now + duration)
+      source._started = false
     } catch (error) {
       if (!started) {
         try { source.disconnect() } catch {}
@@ -1448,14 +1489,14 @@ export class SynthEngine {
       } else {
         let s1: OscillatorNode | AudioBufferSourceNode | null = null
         if (this.patch.osc1.wave === 'noise') {
-          const src = this.ctx.createBufferSource()
+          const src = ensureManagedSource(this.ctx.createBufferSource())
           src.buffer = this.noiseBuffer!
           src.loop = true
           s1 = src
         } else if (this.patch.osc1.wave === 'sample') {
           s1 = this.createSamplerSource(osc1Freq, 'osc1')
         } else {
-          const osc = this.ctx.createOscillator()
+          const osc = ensureManagedSource(this.ctx.createOscillator())
           osc.type = this.patch.osc1.wave as OscillatorType
           osc.frequency.setValueAtTime(osc1Freq, now)
           const fine = this.patch.osc1.detuneFine ?? 0
@@ -1472,7 +1513,7 @@ export class SynthEngine {
 
         if (s1 && this.patch.fm.enabled && 'frequency' in (s1 as any)) {
           const carrier = s1 as OscillatorNode
-          const mod = this.ctx.createOscillator()
+          const mod = ensureManagedSource(this.ctx.createOscillator())
           mod.type = this.patch.osc2.wave as OscillatorType
           const ratio = Math.max(0.01, this.patch.fm.ratio || 1)
           mod.frequency.setValueAtTime(freq * ratio, now)
@@ -1521,12 +1562,12 @@ export class SynthEngine {
       } else {
         let s2: OscillatorNode | AudioBufferSourceNode | null = null
         if (this.patch.osc2.wave === 'noise') {
-          const src = this.ctx.createBufferSource()
+          const src = ensureManagedSource(this.ctx.createBufferSource())
           src.buffer = this.noiseBuffer!
           src.loop = true
           s2 = src
         } else {
-          const osc = this.ctx.createOscillator()
+          const osc = ensureManagedSource(this.ctx.createOscillator())
           osc.type = this.patch.osc2.wave as OscillatorType
           osc.frequency.setValueAtTime(freq, now)
           osc.detune.value = this.patch.osc2.detune
@@ -1578,13 +1619,9 @@ export class SynthEngine {
     g.linearRampToValueAtTime(voiceGainScale, now + Math.max(0.001, env.attack))
     g.linearRampToValueAtTime(env.sustain * voiceGainScale, now + env.attack + Math.max(0.001, env.decay))
 
-    for (const s of sources) {
-      if ('start' in s && !(s as any)._autoStarted) (s as any).start()
-    }
-
     // Sub oscillator: mixed into the same ADSR path
     if (this.patch.sub.enabled) {
-      const subOsc = this.ctx.createOscillator()
+      const subOsc = ensureManagedSource(this.ctx.createOscillator())
       subOsc.type = (this.patch.sub.wave || 'square') as OscillatorType
       const subFreq = freq / Math.pow(2, Math.max(1, Math.min(2, this.patch.sub.octave)))
       subOsc.frequency.setValueAtTime(subFreq, now)
@@ -1602,13 +1639,36 @@ export class SynthEngine {
       }
     }
 
+    for (const s of sources) {
+      if ('start' in s) {
+        const node = ensureManagedSource(s)
+        if (node._autoStarted) continue
+        if (!node._started) {
+          node.start()
+          markSourceStarted(node)
+        }
+      }
+    }
+
     const stop = (releaseTime: number) => {
       const t = Math.max(this.ctx.currentTime, releaseTime)
       g.cancelScheduledValues(t)
       g.setValueAtTime(g.value, t)
       g.linearRampToValueAtTime(0, t + Math.max(0.001, env.release))
       for (const s of sources) {
-        if ('stop' in s) (s as any).stop(t + env.release + 0.05)
+        if ('stop' in s) {
+          const node = ensureManagedSource(s)
+          if (!node._started) continue
+          try {
+            node.stop(t + env.release + 0.05)
+          } catch (error) {
+            if (!(error instanceof DOMException)) {
+              throw error
+            }
+          } finally {
+            node._started = false
+          }
+        }
       }
       for (const macro of macroVoices) {
         try { macro.stop(t + env.release + 0.05) } catch {}
