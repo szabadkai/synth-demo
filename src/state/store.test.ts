@@ -78,3 +78,94 @@ describe('useStore patch normalization', () => {
     )
   })
 })
+
+describe('sampler library management', () => {
+  const resetState = () => {
+    const resetPatch = typeof structuredClone === 'function'
+      ? structuredClone(defaultPatch)
+      : JSON.parse(JSON.stringify(defaultPatch))
+    useStore.setState((state) => ({
+      ...state,
+      engine: null,
+      patch: resetPatch,
+      samplerLibrary: [],
+    }))
+  }
+
+  beforeEach(() => {
+    resetState()
+  })
+
+  it('saves a sampler sample and normalizes the target oscillator', () => {
+    const sample = {
+      id: 'sample-1',
+      name: 'My Sample',
+      dataUrl: 'data:audio/webm;base64,AAAA',
+      rootMidi: 60,
+      loop: true,
+      durationSec: 1.2,
+      trimStartSec: 0.1,
+      trimEndSec: 1.0,
+    }
+
+    useStore.getState().saveSamplerSample('osc1', sample)
+
+    const state = useStore.getState()
+    expect(state.samplerLibrary).toHaveLength(1)
+    expect(state.samplerLibrary[0]).toMatchObject({
+      id: 'sample-1',
+      name: 'My Sample',
+      loop: true,
+    })
+    expect(state.patch.osc1.mode).toBe('sampler')
+    expect(state.patch.osc1.sampler?.id).toBe('sample-1')
+    expect(state.patch.sampler?.id).toBe('sample-1')
+  })
+
+  it('can select a library sample onto an oscillator', () => {
+    const existing = {
+      id: 'sample-2',
+      name: 'Library',
+      dataUrl: 'data:audio/wav;base64,BBBB',
+      rootMidi: 48,
+      loop: false,
+      durationSec: 0.8,
+      trimStartSec: 0,
+      trimEndSec: 0.8,
+    }
+    useStore.setState((state) => ({
+      ...state,
+      samplerLibrary: [existing],
+    }))
+
+    useStore.getState().setSamplerFromLibrary('osc2', 'sample-2')
+
+    const state = useStore.getState()
+    expect(state.patch.osc2.mode).toBe('sampler')
+    expect(state.patch.osc2.sampler?.id).toBe('sample-2')
+    expect(state.patch.osc2.sampler?.loop).toBe(false)
+  })
+
+  it('deletes a sample and resets any oscillators using it', () => {
+    const sample = {
+      id: 'sample-3',
+      name: 'Temp',
+      dataUrl: 'data:audio/webm;base64,CCCC',
+      rootMidi: 55,
+      loop: true,
+      durationSec: 1.5,
+      trimStartSec: 0,
+      trimEndSec: 1.5,
+    }
+
+    useStore.getState().saveSamplerSample('osc1', sample)
+    useStore.getState().setSamplerFromLibrary('osc2', 'sample-3')
+
+    useStore.getState().deleteSamplerSample('sample-3')
+
+    const state = useStore.getState()
+    expect(state.samplerLibrary).toHaveLength(0)
+    expect(state.patch.osc1.sampler?.id).not.toBe('sample-3')
+    expect(state.patch.osc2.sampler?.id).not.toBe('sample-3')
+  })
+})
