@@ -166,6 +166,105 @@ body {
   border: 0;
 }
 
+.mod-matrix-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mod-matrix-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mod-matrix-add {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #2a3040;
+  background: #13161f;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.mod-matrix-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.mod-matrix-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mod-matrix-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mod-matrix-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mod-matrix-row.disabled {
+  opacity: 0.55;
+}
+
+.mod-matrix-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mod-matrix-col.amount {
+  align-items: flex-start;
+}
+
+.mod-matrix-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mod-matrix-amount {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mod-matrix-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mod-matrix-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.mod-matrix-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.mod-matrix-remove:hover {
+  color: var(--accent-2);
+}
+
 .app > main {
   flex: 1;
   overflow: auto;

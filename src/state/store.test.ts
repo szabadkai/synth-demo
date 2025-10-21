@@ -169,3 +169,45 @@ describe('sampler library management', () => {
     expect(state.patch.osc2.sampler?.id).not.toBe('sample-3')
   })
 })
+
+describe('mod matrix actions', () => {
+  beforeEach(() => {
+    const resetPatch = typeof structuredClone === 'function'
+      ? structuredClone(defaultPatch)
+      : JSON.parse(JSON.stringify(defaultPatch))
+    useStore.setState((state) => ({
+      ...state,
+      engine: null,
+      patch: resetPatch,
+    }))
+  })
+
+  it('adds a new modulation route with sane defaults', () => {
+    expect(useStore.getState().patch.modMatrix).toHaveLength(0)
+    useStore.getState().addModRoute()
+    const matrix = useStore.getState().patch.modMatrix ?? []
+    expect(matrix).toHaveLength(1)
+    expect(matrix[0].id).toMatch(/^mod-/)
+    expect(matrix[0].source).toBe('lfo1')
+    expect(matrix[0].target).toBe('filter.cutoff')
+    expect(matrix[0].enabled).toBe(true)
+  })
+
+  it('updates and clamps modulation amount', () => {
+    useStore.getState().addModRoute()
+    const id = useStore.getState().patch.modMatrix?.[0].id as string
+    useStore.getState().updateModRoute(id, { amount: 2, source: 'velocity', target: 'macro.level' })
+    expect(useStore.getState().patch.modMatrix?.[0].amount).toBe(1)
+    expect(useStore.getState().patch.modMatrix?.[0].source).toBe('velocity')
+    expect(useStore.getState().patch.modMatrix?.[0].target).toBe('macro.level')
+    useStore.getState().updateModRoute(id, { amount: -2 })
+    expect(useStore.getState().patch.modMatrix?.[0].amount).toBe(-1)
+  })
+
+  it('removes modulation routes', () => {
+    useStore.getState().addModRoute()
+    const id = useStore.getState().patch.modMatrix?.[0].id as string
+    useStore.getState().removeModRoute(id)
+    expect(useStore.getState().patch.modMatrix).toHaveLength(0)
+  })
+})

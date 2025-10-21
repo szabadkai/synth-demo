@@ -24,9 +24,10 @@ import { OnboardingGuide } from './OnboardingGuide'
 import { BuyCoffeeButton } from './BuyCoffeeButton'
 import { OscilloscopeSettings } from './OscilloscopeSettings'
 import { PresetSelector } from './PresetSelector'
+import { ModMatrixPanel } from './ModMatrixPanel'
 
 const GUIDE_STORAGE_KEY = 'websynth-guide-seen'
-const HELP_PANEL_IDS = ['oscilloscope', 'oscillator', 'effects', 'lfos', 'arp', 'sequencer', 'drum', 'keyboard'] as const
+const HELP_PANEL_IDS = ['oscilloscope', 'oscillator', 'effects', 'lfos', 'arp', 'sequencer', 'modmatrix', 'drum', 'keyboard'] as const
 type PanelHelpId = typeof HELP_PANEL_IDS[number]
 type PanelHelpContent = { title: string; body: React.ReactNode }
 
@@ -95,6 +96,7 @@ export function App() {
     { id: 'oscillator', title: 'Oscillator', span: 2, render: () => <OscillatorPanel /> },
     { id: 'effects', title: 'Effects', span: 2, render: () => <EffectsPanel /> },
     { id: 'lfos', title: 'LFOs', span: 2, render: () => <LFOPanel /> },
+    { id: 'modmatrix', title: 'Mod Matrix', span: 2, render: () => <ModMatrixPanel /> },
     { id: 'arp', title: 'Arpeggiator', span: 2, render: () => <ArpPanel /> },
     { id: 'sequencer', title: 'Sequencer', span: 2, render: () => <SequencerPanel /> },
     { id: 'drum', title: 'Drum Machine', span: 2, render: () => <DrumMachinePanel /> },
@@ -212,6 +214,27 @@ export function App() {
           <ul>
             <li>Use LFO1 for slow filter sweeps and LFO2 for faster vibrato or tremolo.</li>
             <li>Disable the checkbox to park an LFO without losing its configuration.</li>
+          </ul>
+        </div>
+      ),
+    },
+    modmatrix: {
+      title: 'Mod Matrix',
+      body: (
+        <div className="module-help">
+          <p>Layer additional motion by routing the LFOs into filter or master parameters.</p>
+          <h5>Routing</h5>
+          <ul>
+            <li><strong>Source</strong>: pick which LFO feeds the route—depth follows that LFO&rsquo;s shape.</li>
+            <li><strong>Target</strong>: choose filter cutoff, resonance, or master gain as the modulation destination.</li>
+            <li><strong>Amount</strong>: dial positive values to boost, negative to invert; the percentage shows the exact depth.</li>
+            <li><strong>Enabled</strong>: toggle a route on/off without deleting it.</li>
+            <li><strong>Sequencer Step</strong>: the Sequencer source mirrors the current step velocity for rhythmic modulation.</li>
+          </ul>
+          <h5>Tips</h5>
+          <ul>
+            <li>Stack multiple routes per LFO to move cutoff and resonance together.</li>
+            <li>Use opposing amounts to push resonance down while cutoff rises for smooth sweeps.</li>
           </ul>
         </div>
       ),

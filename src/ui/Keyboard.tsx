@@ -57,7 +57,7 @@ export function Keyboard() {
   }, [activeLocal, midiActive])
 
   const noteOn = (midi: number) => {
-    engine?.noteOn(midi)
+    engine?.noteOn(midi, 1)
     setActiveLocal((prev: Set<number>) => new Set<number>(prev).add(midi))
   }
   const noteOff = (midi: number) => {

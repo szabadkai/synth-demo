@@ -148,7 +148,8 @@ export function MidiManager() {
       const command = status & 0xf0
       const midiNote = data1
       if (command === NOTE_ON && data2 > 0) {
-        if (engine) engine.noteOn(midiNote)
+        const velocity = Math.max(0, Math.min(1, data2 / 127))
+        if (engine) engine.noteOn(midiNote, velocity)
         activeNotesRef.current.add(midiNote)
         setMidiActiveNotes(Array.from(activeNotesRef.current))
         return

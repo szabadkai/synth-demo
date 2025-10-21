@@ -6,7 +6,15 @@ import {
   DEFAULT_OSCILLATOR_MACRO,
   DEFAULT_OSCILLATOR_SAMPLER,
 } from '../audio-engine/engine'
-import type { Patch, SamplerSettings, EngineMode, OscillatorMode } from '../audio-engine/engine'
+import type {
+  Patch,
+  SamplerSettings,
+  EngineMode,
+  OscillatorMode,
+  ModMatrixRow,
+  ModSource,
+  ModTarget,
+} from '../audio-engine/engine'
 
 const normalizeOscillator = (osc: Patch['osc1']): Patch['osc1'] => ({
   ...osc,
@@ -28,6 +36,46 @@ const selectMacroSource = (state: Patch): NonNullable<Patch['macro']> => {
   if (state.osc1.mode === 'macro' && state.osc1.macro) return state.osc1.macro
   if (state.osc2.mode === 'macro' && state.osc2.macro) return state.osc2.macro
   return state.macro ?? DEFAULT_OSCILLATOR_MACRO
+}
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const MOD_SOURCES: ModSource[] = ['lfo1', 'lfo2', 'exprX', 'exprY', 'seqStep', 'velocity', 'gate']
+const MOD_TARGETS: ModTarget[] = [
+  'filter.cutoff',
+  'filter.q',
+  'master.gain',
+  'macro.harmonics',
+  'macro.timbre',
+  'macro.morph',
+  'macro.level',
+  'fm.amount',
+  'mix',
+  'envelope.attack',
+  'envelope.release',
+]
+
+const normalizeModRow = (row: Partial<ModMatrixRow>, fallbackId: string): ModMatrixRow => {
+  const id = typeof row.id === 'string' && row.id.length > 0 ? row.id : fallbackId
+  const source = MOD_SOURCES.includes(row.source as ModSource) ? (row.source as ModSource) : 'lfo1'
+  const target = MOD_TARGETS.includes(row.target as ModTarget) ? (row.target as ModTarget) : 'filter.cutoff'
+  const amount = clamp(Number.isFinite(row.amount) ? Number(row.amount) : 0, -1, 1)
+  const enabled = row.enabled !== false
+  return { id, source, target, amount, enabled }
+}
+
+const makeModId = () => `mod-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 6)}`
+
+const normalizeModMatrix = (rows: Partial<ModMatrixRow>[]): ModMatrixRow[] => {
+  const seen = new Set<string>()
+  return rows.map((raw) => {
+    let normalized = normalizeModRow(raw, makeModId())
+    if (seen.has(normalized.id)) {
+      normalized = { ...normalized, id: makeModId() }
+    }
+    seen.add(normalized.id)
+    return normalized
+  })
 }
 
 export type MidiDeviceInfo = {
@@ -83,6 +131,9 @@ export type State = {
   renameSamplerSample: (id: string, name: string) => void
   playSamplerPreview: (target: 'osc1' | 'osc2') => void
   resetPatch: () => void
+  addModRoute: () => void
+  updateModRoute: (id: string, changes: Partial<ModMatrixRow>) => void
+  removeModRoute: (id: string) => void
 }
 
 export const useStore = create<State>()(
@@ -107,6 +158,10 @@ export const useStore = create<State>()(
       setEngine: (e) => set({ engine: e }),
       updatePatch: (p) => {
         const prevPatch = get().patch
+        const incomingMatrix = Array.isArray((p as any).modMatrix)
+          ? normalizeModMatrix((p as any).modMatrix as Partial<ModMatrixRow>[])
+          : undefined
+        const prevMatrix = (prevPatch.modMatrix ?? []).map((row) => ({ ...row }))
         const next = {
           ...prevPatch,
           ...p,
@@ -130,6 +185,7 @@ export const useStore = create<State>()(
         }
         next.osc1 = normalizeOscillator(next.osc1)
         next.osc2 = normalizeOscillator(next.osc2)
+        next.modMatrix = incomingMatrix ?? prevMatrix
 
         const requestedEngineMode = p.engineMode
         const derivedEngineMode = requestedEngineMode
@@ -147,6 +203,9 @@ export const useStore = create<State>()(
 
         if (derivedEngineMode === 'macro' || p.macro !== undefined || (p as any).osc1?.macro !== undefined || (p as any).osc2?.macro !== undefined) {
           enginePatch.macro = normalizedMacro
+        }
+        if (incomingMatrix !== undefined) {
+          enginePatch.modMatrix = incomingMatrix
         }
 
         // Apply only the delta to the engine to avoid heavy reconfiguration on unrelated tweaks
@@ -179,6 +238,9 @@ export const useStore = create<State>()(
           sequencer: { ...((get().patch as any).sequencer || defaultPatch.sequencer), ...(obj as any).sequencer },
           mix: (obj as any).mix != null ? (obj as any).mix : get().patch.mix,
           expression: { ...((get().patch as any).expression || defaultPatch.expression), ...(obj as any).expression },
+          modMatrix: Array.isArray((obj as any).modMatrix)
+            ? normalizeModMatrix((obj as any).modMatrix as Partial<ModMatrixRow>[])
+            : ((get().patch.modMatrix ?? []).map((row) => ({ ...row }))),
         }
         merged.osc1 = normalizeOscillator(merged.osc1)
         merged.osc2 = normalizeOscillator(merged.osc2)
@@ -322,6 +384,29 @@ export const useStore = create<State>()(
         state.engine?.applyPatch(defaultPatch)
         return { patch: defaultPatch, samplerLibrary: state.samplerLibrary }
       }),
+      addModRoute: () => {
+        const current = get().patch.modMatrix ?? []
+        if (current.length >= 16) return
+        const base: ModMatrixRow = {
+          id: makeModId(),
+          source: 'lfo1',
+          target: 'filter.cutoff',
+          amount: 0.5,
+          enabled: true,
+        }
+        const matrix = [...current.map((row) => ({ ...row })), base]
+        get().updatePatch({ modMatrix: matrix } as Partial<Patch>)
+      },
+      updateModRoute: (id, changes) => {
+        const matrix = (get().patch.modMatrix ?? []).map((row) =>
+          row.id === id ? normalizeModRow({ ...row, ...changes }, row.id) : row,
+        )
+        get().updatePatch({ modMatrix: matrix } as Partial<Patch>)
+      },
+      removeModRoute: (id) => {
+        const matrix = (get().patch.modMatrix ?? []).filter((row) => row.id !== id)
+        get().updatePatch({ modMatrix: matrix } as Partial<Patch>)
+      },
     }),
     {
       name: 'websynth-patch',
@@ -368,6 +453,9 @@ export const useStore = create<State>()(
           sequencer: { ...defaultPatch.sequencer!, ...(p.sequencer || {}) },
           mix: typeof p.mix === 'number' ? p.mix : defaultPatch.mix,
           expression: { ...defaultPatch.expression!, ...(p.expression || {}) },
+          modMatrix: Array.isArray(p.modMatrix)
+            ? normalizeModMatrix(p.modMatrix as Partial<ModMatrixRow>[])
+            : [],
         }
         const layoutOrder: string[] = Array.isArray(persistedState?.layoutOrder)
           ? persistedState.layoutOrder.filter((id: unknown) => typeof id === 'string')

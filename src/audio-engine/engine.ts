@@ -59,6 +59,29 @@ export type OscillatorConfig = {
   sampler?: SamplerSettings
 }
 
+export type ModSource = 'lfo1' | 'lfo2' | 'exprX' | 'exprY' | 'seqStep' | 'velocity' | 'gate'
+
+export type ModTarget =
+  | 'filter.cutoff'
+  | 'filter.q'
+  | 'master.gain'
+  | 'macro.harmonics'
+  | 'macro.timbre'
+  | 'macro.morph'
+  | 'macro.level'
+  | 'fm.amount'
+  | 'mix'
+  | 'envelope.attack'
+  | 'envelope.release'
+
+export type ModMatrixRow = {
+  id: string
+  source: ModSource
+  target: ModTarget
+  amount: number
+  enabled: boolean
+}
+
 export type Patch = {
   osc1: OscillatorConfig
   osc2: OscillatorConfig
@@ -119,6 +142,7 @@ export type Patch = {
     x: ExpressionTarget
     y: ExpressionTarget
   }
+  modMatrix?: ModMatrixRow[]
 }
 
 export const DEFAULT_OSCILLATOR_MACRO: MacroSettings = {
@@ -196,6 +220,7 @@ export const defaultPatch: Patch = {
     steps: Array.from({ length: 16 }, () => ({ on: false, offset: 0, velocity: 1 })),
   },
   expression: { x: 'osc1.detune', y: 'filter.cutoff' },
+  modMatrix: [],
 }
 
 type ExpressionTargetDefinition = {
@@ -243,6 +268,16 @@ const markSourceAutoStarted = (source: AudioScheduledSourceNode) => {
   managed._autoStarted = true
   managed._started = true
 }
+
+const isAudioSource = (source: ModSource) => source === 'lfo1' || source === 'lfo2'
+
+const isAudioTarget = (target: ModTarget) =>
+  target === 'filter.cutoff' ||
+  target === 'filter.q' ||
+  target === 'master.gain' ||
+  target === 'mix'
+
+const isControlSource = (source: ModSource) => source === 'exprX' || source === 'exprY' || source === 'seqStep' || source === 'velocity' || source === 'gate'
 
 const getLfoPatch = (engine: SynthEngine, which: 'lfo1' | 'lfo2') => engine.patch[which] ?? defaultPatch[which]!
 
@@ -376,6 +411,20 @@ const EXPRESSION_RUNTIME_TARGETS: Record<ExpressionTarget, ExpressionTargetDefin
   },
 }
 
+const CONTROL_TARGET_DEFINITIONS: Partial<Record<ModTarget, ExpressionTargetDefinition>> = {
+  'filter.cutoff': EXPRESSION_RUNTIME_TARGETS['filter.cutoff'],
+  'filter.q': EXPRESSION_RUNTIME_TARGETS['filter.q'],
+  'master.gain': EXPRESSION_RUNTIME_TARGETS['master.gain'],
+  'macro.harmonics': EXPRESSION_RUNTIME_TARGETS['macro.harmonics'],
+  'macro.timbre': EXPRESSION_RUNTIME_TARGETS['macro.timbre'],
+  'macro.morph': EXPRESSION_RUNTIME_TARGETS['macro.morph'],
+  'macro.level': EXPRESSION_RUNTIME_TARGETS['macro.level'],
+  'fm.amount': EXPRESSION_RUNTIME_TARGETS['fm.amount'],
+  mix: EXPRESSION_RUNTIME_TARGETS.mix,
+  'envelope.attack': EXPRESSION_RUNTIME_TARGETS['envelope.attack'],
+  'envelope.release': EXPRESSION_RUNTIME_TARGETS['envelope.release'],
+}
+
 type ExpressionAxis = 'x' | 'y'
 
 type DeepPartial<T> = T extends Function
@@ -404,8 +453,9 @@ type ActiveVoice = {
   stop: (t: number) => void
   osc1Detune?: AudioParam
   osc2Detune?: AudioParam
-  osc1Mix?: GainNode
-  osc2Mix?: GainNode
+  mixControl?: ConstantSourceNode
+  mixBias?: ConstantSourceNode
+  mixConnections: Array<{ sourceIndex: number; gain: GainNode }>
 }
 
 export class SynthEngine {
@@ -437,6 +487,18 @@ export class SynthEngine {
   private samplerMeta: SamplerSettings = { ...defaultPatch.sampler }
   private samplerLoadToken = 0
   private samplerPitchCache = new Map<string, AudioBuffer>()
+  private modMatrixConnections = new Map<string, { sourceIndex: number; tap: GainNode; target: ModTarget }>()
+  private controlSourceValues: Record<'exprX' | 'exprY' | 'seqStep' | 'velocity' | 'gate', number> = {
+    exprX: 0,
+    exprY: 0,
+    seqStep: 0,
+    velocity: -1,
+    gate: -1,
+  }
+  private controlModRows: ModMatrixRow[] = []
+  private controlModSnapshots = new Map<ModTarget, number>()
+  private mixAudioAmounts: [number, number] = [0, 0]
+  private activeNoteVelocities = new Map<number, number>()
   patch: Patch
 
   // Arpeggiator state
@@ -455,6 +517,234 @@ export class SynthEngine {
   private seqCurrentStepMs = 0
   private seqStepIndex = 0
   private seqLastNote: number | null = null
+  private seqControlToken = 0
+
+  private getModSourceIndex(source: ModSource): number {
+    switch (source) {
+      case 'lfo1':
+        return 0
+      case 'lfo2':
+        return 1
+      default:
+        return -1
+    }
+  }
+
+  private getModTargetInfo(target: ModTarget) {
+    switch (target) {
+      case 'filter.cutoff':
+        return { param: this.filter.frequency, type: 'param' as const, scale: (amount: number) => amount * 2000 }
+      case 'filter.q':
+        return { param: this.filter.Q, type: 'param' as const, scale: (amount: number) => amount * 5 }
+      case 'master.gain':
+        return { param: this.master.gain, type: 'param' as const, scale: (amount: number) => amount * 0.5 }
+      default:
+        return null
+    }
+  }
+
+  private getLfoConfig(source: 'lfo1' | 'lfo2'): NonNullable<Patch['lfo1']> {
+    return source === 'lfo2'
+      ? (this.patch.lfo2 ?? defaultPatch.lfo2!)
+      : (this.patch.lfo1 ?? defaultPatch.lfo1!)
+  }
+
+  private removeModConnection(id: string) {
+    const existing = this.modMatrixConnections.get(id)
+    if (!existing) return
+    const sourceNode = this.lfos[existing.sourceIndex]?.gain
+    if (sourceNode) {
+      try { sourceNode.disconnect(existing.tap) } catch {}
+    }
+    try { existing.tap.disconnect() } catch {}
+    this.modMatrixConnections.delete(id)
+  }
+
+  applyModMatrix(rows: ModMatrixRow[] = []) {
+    const activeRows = rows.filter((row) => row && row.enabled)
+    const audioRows = activeRows.filter((row) => isAudioSource(row.source) && isAudioTarget(row.target))
+    const seen = new Set<string>()
+    const mixAudio: [number, number] = [0, 0]
+    for (const row of audioRows) {
+      const sourceIndex = this.getModSourceIndex(row.source)
+      if (sourceIndex < 0) continue
+      if (row.target === 'mix') {
+        const sourceNode = this.lfos[sourceIndex]?.gain
+        const lfoSource = row.source === 'lfo2' ? 'lfo2' : 'lfo1'
+        const lfoConfig = this.getLfoConfig(lfoSource)
+        const fallbackScale = Math.max(0, lfoConfig.amount ?? 0)
+        const baseScaleRaw = sourceNode ? Math.abs(sourceNode.gain.value) : 0
+        const scale = baseScaleRaw > 1e-6 ? baseScaleRaw : fallbackScale > 1e-6 ? fallbackScale : 1
+        mixAudio[sourceIndex] += row.amount / scale
+        continue
+      }
+      const sourceNode = this.lfos[sourceIndex]?.gain
+      if (!sourceNode) continue
+      const info = this.getModTargetInfo(row.target)
+      if (!info) continue
+
+      const desired = info.scale(row.amount)
+      const lfoSource = row.source === 'lfo2' ? 'lfo2' : 'lfo1'
+      const lfoConfig = this.getLfoConfig(lfoSource)
+      const fallbackScale = Math.max(0, lfoConfig.amount ?? 0)
+      const baseScaleRaw = Math.abs(sourceNode.gain.value)
+      const sourceScale = baseScaleRaw > 0 ? baseScaleRaw : fallbackScale
+      const targetGain = sourceScale > 0 ? desired / sourceScale : 0
+      const existing = this.modMatrixConnections.get(row.id)
+      if (existing && (existing.sourceIndex !== sourceIndex || existing.target !== row.target)) {
+        this.removeModConnection(row.id)
+      }
+      let conn = this.modMatrixConnections.get(row.id)
+      if (!conn) {
+        const tap = this.ctx.createGain()
+        tap.gain.value = targetGain
+        sourceNode.connect(tap)
+        tap.connect(info.param)
+        conn = { sourceIndex, tap, target: row.target }
+        this.modMatrixConnections.set(row.id, conn)
+      } else {
+        conn.tap.gain.setValueAtTime(targetGain, this.ctx.currentTime)
+        conn.target = row.target
+      }
+      seen.add(row.id)
+    }
+    for (const [id] of this.modMatrixConnections) {
+      if (!seen.has(id)) {
+        this.removeModConnection(id)
+      }
+    }
+
+    this.resetControlTargets()
+    this.controlModRows = activeRows.filter((row) => isControlSource(row.source))
+    this.applyControlModMatrix()
+    this.mixAudioAmounts = [clampValue(mixAudio[0], -1, 1), clampValue(mixAudio[1], -1, 1)]
+    this.refreshMixAudioConnections()
+  }
+
+  private refreshMixAudioConnections() {
+    const now = this.ctx.currentTime
+    const lfoConfigs: Array<NonNullable<Patch['lfo1']>> = [
+      this.patch.lfo1 ?? defaultPatch.lfo1!,
+      this.patch.lfo2 ?? defaultPatch.lfo2!,
+    ]
+    const lfoCount = Math.min(this.lfos.length, this.mixAudioAmounts.length)
+    for (const voice of this.activeVoices.values()) {
+      if (!voice.mixControl) continue
+      if (!voice.mixConnections) voice.mixConnections = []
+      for (let i = 0; i < lfoCount; i++) {
+        const amount = this.mixAudioAmounts[i]
+        const enabled = !!lfoConfigs[i]?.enabled
+        const shouldEnable = enabled && Math.abs(amount) > 1e-4
+        let connIndex = voice.mixConnections.findIndex((c) => c.sourceIndex === i)
+        if (shouldEnable) {
+          if (connIndex === -1) {
+            const gain = this.ctx.createGain()
+            gain.gain.value = amount
+            const sourceNode = this.lfos[i]?.gain
+            if (!sourceNode) continue
+            sourceNode.connect(gain)
+            gain.connect(voice.mixControl.offset)
+            voice.mixConnections.push({ sourceIndex: i, gain })
+          } else {
+            voice.mixConnections[connIndex].gain.gain.setValueAtTime(amount, now)
+          }
+        } else if (connIndex !== -1) {
+          const entry = voice.mixConnections[connIndex]
+          const sourceNode = this.lfos[entry.sourceIndex]?.gain
+          if (sourceNode) {
+            try { sourceNode.disconnect(entry.gain) } catch {}
+          }
+          try { entry.gain.disconnect() } catch {}
+          voice.mixConnections.splice(connIndex, 1)
+        }
+      }
+    }
+  }
+
+  private getControlSourceValue(source: ModSource) {
+    if (source === 'exprX') return this.controlSourceValues.exprX
+    if (source === 'exprY') return this.controlSourceValues.exprY
+    if (source === 'seqStep') return this.controlSourceValues.seqStep
+    if (source === 'velocity') return this.controlSourceValues.velocity
+    if (source === 'gate') return this.controlSourceValues.gate
+    return 0
+  }
+
+  private updateControlSource(source: 'exprX' | 'exprY' | 'seqStep' | 'velocity' | 'gate', value: number) {
+    const clamped = clampValue(value, -1, 1)
+    if (this.controlSourceValues[source] === clamped) return
+    this.controlSourceValues[source] = clamped
+    this.applyControlModMatrix()
+  }
+
+  private resetControlTargets() {
+    if (this.controlModSnapshots.size === 0) return
+    for (const [target, base] of this.controlModSnapshots) {
+      const def = CONTROL_TARGET_DEFINITIONS[target]
+      if (!def) continue
+      def.apply(this, base)
+    }
+    this.controlModSnapshots.clear()
+  }
+
+  private applyControlModMatrix() {
+    if (this.controlModRows.length === 0) {
+      this.resetControlTargets()
+      return
+    }
+
+    const sums = new Map<ModTarget, { base: number; sum: number }>()
+    for (const row of this.controlModRows) {
+      const def = CONTROL_TARGET_DEFINITIONS[row.target]
+      if (!def) continue
+      const sourceValue = this.getControlSourceValue(row.source)
+      if (!Number.isFinite(sourceValue)) continue
+      let data = sums.get(row.target)
+      if (!data) {
+        const base = this.controlModSnapshots.get(row.target) ?? def.getBase(this)
+        const finiteBase = Number.isFinite(base) ? base : 0
+        this.controlModSnapshots.set(row.target, finiteBase)
+        data = { base: finiteBase, sum: 0 }
+        sums.set(row.target, data)
+      }
+      data.sum += row.amount * sourceValue
+    }
+
+    const activeTargets = new Set(sums.keys())
+    for (const [target, base] of [...this.controlModSnapshots]) {
+      if (!activeTargets.has(target)) {
+        const def = CONTROL_TARGET_DEFINITIONS[target]
+        if (def) {
+          def.apply(this, base)
+        }
+        this.controlModSnapshots.delete(target)
+      }
+    }
+
+    for (const [target, data] of sums) {
+      const def = CONTROL_TARGET_DEFINITIONS[target]
+      if (!def) continue
+      const { base, sum } = data
+      const range = def.range(this, base)
+      const span = range.max - range.min
+      const scaledDelta = span > 0 ? sum * span : 0
+      const value = clampValue(base + scaledDelta, range.min, range.max)
+      def.apply(this, value)
+    }
+  }
+
+  private refreshVelocitySignals() {
+    if (this.activeNoteVelocities.size === 0) {
+      this.updateControlSource('velocity', -1)
+      this.updateControlSource('gate', -1)
+      return
+    }
+    let sum = 0
+    for (const vel of this.activeNoteVelocities.values()) sum += vel
+    const avg = sum / this.activeNoteVelocities.size
+    this.updateControlSource('velocity', clampValue(avg * 2 - 1, -1, 1))
+    this.updateControlSource('gate', 1)
+  }
 
   constructor(ctx?: AudioContext) {
     this.ctx = ctx ?? new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -720,6 +1010,14 @@ export class SynthEngine {
     const prev = this.patch
     const incomingOsc1 = (p.osc1 ?? {}) as Partial<OscillatorConfig>
     const incomingOsc2 = (p.osc2 ?? {}) as Partial<OscillatorConfig>
+    const incomingModMatrix = Array.isArray((p as any).modMatrix)
+      ? ((p as any).modMatrix as ModMatrixRow[]).map((row) => ({
+          ...row,
+          amount: Number.isFinite(row.amount) ? row.amount : 0,
+          enabled: row.enabled !== false,
+        }))
+      : undefined
+    const prevModMatrix = (this.patch.modMatrix ?? []).map((row) => ({ ...row }))
 
     const mergedOsc1 = normalizeOscillatorConfig({
       ...this.patch.osc1,
@@ -741,7 +1039,7 @@ export class SynthEngine {
       filter: { ...this.patch.filter, ...(p.filter ?? {}) },
       envelope: { ...this.patch.envelope, ...(p.envelope ?? {}) },
       master: { ...this.patch.master, ...(p.master ?? {}) },
-      mix: p.mix != null ? p.mix : this.patch.mix,
+      mix: p.mix != null ? clampValue(p.mix, 0, 1) : this.patch.mix,
       engineMode: p.engineMode ?? this.patch.engineMode ?? 'classic',
       sampler: { ...(this.patch.sampler ?? defaultPatch.sampler), ...(p.sampler ?? {}) },
       macro: { ...(this.patch.macro ?? DEFAULT_OSCILLATOR_MACRO), ...(p.macro ?? {}) },
@@ -757,6 +1055,7 @@ export class SynthEngine {
         ...(p.sequencer ?? {}),
       } as Patch['sequencer'],
       expression: { ...(this.patch.expression ?? defaultPatch.expression!), ...(p.expression ?? {}) },
+      modMatrix: incomingModMatrix ?? prevModMatrix,
     }
 
     this.patch = next
@@ -772,12 +1071,10 @@ export class SynthEngine {
     this.configureExpressionRouting(next.expression)
 
     if (p.mix !== undefined && next.mix !== prev.mix) {
-      const level1 = clampValue(1 - next.mix, 0, 1)
-      const level2 = clampValue(next.mix, 0, 1)
+      const value = clampValue(next.mix, 0, 1)
       const now = this.ctx.currentTime
       for (const voice of this.activeVoices.values()) {
-        if (voice.osc1Mix) voice.osc1Mix.gain.setTargetAtTime(level1, now, 0.01)
-        if (voice.osc2Mix) voice.osc2Mix.gain.setTargetAtTime(level2, now, 0.01)
+        if (voice.mixControl) voice.mixControl.offset.setTargetAtTime(value, now, 0.01)
       }
     }
 
@@ -826,11 +1123,15 @@ export class SynthEngine {
           }
         }
       }
+      this.refreshMixAudioConnections()
     }
 
     // Reconfigure arpeggiator/sequencer only when those sections changed
     if (p.arp !== undefined) this.updateArpScheduler({ forceRestart: true })
     if (p.sequencer !== undefined) this.updateSeqScheduler()
+    if (p.modMatrix !== undefined || p.lfo1 !== undefined || p.lfo2 !== undefined) {
+      this.applyModMatrix(this.patch.modMatrix ?? [])
+    }
 
     // Live-detune updates for currently playing voices
     if (p.osc1?.detune !== undefined || p.osc1?.detuneFine !== undefined) {
@@ -923,6 +1224,8 @@ export class SynthEngine {
     }
     this.expression2D = { active: true, x: nx, y: ny }
     this.applyExpression2D()
+    this.updateControlSource('exprX', nx * 2 - 1)
+    this.updateControlSource('exprY', ny * 2 - 1)
   }
 
   clearExpression2D() {
@@ -934,6 +1237,8 @@ export class SynthEngine {
       this.expressionApplying = false
       this.expression2D = { active: false, x: 0.5, y: 0.5 }
       this.expressionSnapshot = { x: null, y: null }
+      this.updateControlSource('exprX', 0)
+      this.updateControlSource('exprY', 0)
     }
   }
 
@@ -1590,15 +1895,28 @@ export class SynthEngine {
     // Sub-mix for two oscillators
     const sub1 = this.ctx.createGain()
     const sub2 = this.ctx.createGain()
-    const mix = Math.max(0, Math.min(1, this.patch.mix))
-    sub1.gain.value = 1 - mix
-    sub2.gain.value = mix
+    sub1.gain.value = 0
+    sub2.gain.value = 0
     // Normal sum (so we can crossfade with ring product if enabled)
     const normalSum = this.ctx.createGain()
     normalSum.gain.value = 1
     sub1.connect(normalSum)
     sub2.connect(normalSum)
     normalSum.connect(oscGain)
+
+    const mixBase = clampValue(this.patch.mix, 0, 1)
+    const mixControl = this.ctx.createConstantSource()
+    mixControl.offset.value = mixBase
+    const mixBias = this.ctx.createConstantSource()
+    mixBias.offset.value = 1
+    const mixInvert = this.ctx.createGain()
+    mixInvert.gain.value = -1
+    mixControl.connect(sub2.gain)
+    mixControl.connect(mixInvert)
+    mixInvert.connect(sub1.gain)
+    mixBias.connect(sub1.gain)
+    mixControl.start()
+    mixBias.start()
 
     const sources: AudioScheduledSourceNode[] = []
     let osc1Node: OscillatorNode | null = null
@@ -1796,6 +2114,8 @@ export class SynthEngine {
       }
     }
 
+    const mixConnections: Array<{ sourceIndex: number; gain: GainNode }> = []
+
     const stop = (releaseTime: number) => {
       const t = Math.max(this.ctx.currentTime, releaseTime)
       g.cancelScheduledValues(t)
@@ -1823,13 +2143,26 @@ export class SynthEngine {
       for (const c of lfoParamConnections) {
         try { c.g.disconnect(c.p) } catch {}
       }
+      for (const conn of mixConnections) {
+        const sourceNode = this.lfos[conn.sourceIndex]?.gain
+        if (sourceNode) {
+          try { sourceNode.disconnect(conn.gain) } catch {}
+        }
+        try { conn.gain.disconnect() } catch {}
+      }
+      try { mixControl.stop(t + env.release + 0.05) } catch {}
+      try { mixBias.stop(t + env.release + 0.05) } catch {}
+      try { mixControl.disconnect() } catch {}
+      try { mixInvert.disconnect() } catch {}
+      try { mixBias.disconnect() } catch {}
     }
 
     // Expose detune params for live updates (only if oscillators, not noise)
     const voiceHandle: ActiveVoice = {
       stop,
-      osc1Mix: sub1,
-      osc2Mix: sub2,
+      mixControl,
+      mixBias,
+      mixConnections,
     }
     if (osc1Node) voiceHandle.osc1Detune = osc1Node.detune
     if (osc2Node) voiceHandle.osc2Detune = osc2Node.detune
@@ -1843,6 +2176,8 @@ export class SynthEngine {
     const t = this.ctx.currentTime
     for (const v of this.activeVoices.values()) v.stop(t)
     this.activeVoices.clear()
+    this.activeNoteVelocities.clear()
+    this.refreshVelocitySignals()
   }
 
   // --- Arpeggiator helpers ---
@@ -2023,7 +2358,7 @@ export class SynthEngine {
     // Play now
     this.arpBypass = true
     try {
-      this.noteOn(midi)
+      this.noteOn(midi, 1)
     } finally {
       this.arpBypass = false
     }
@@ -2088,6 +2423,7 @@ export class SynthEngine {
         try { this.noteOff(toOff) } finally { this.arpBypass = false }
         this.seqLastNote = null
       }
+      this.updateControlSource('seqStep', 0)
     }
   }
 
@@ -2127,17 +2463,26 @@ export class SynthEngine {
 
     if (step.on) {
       const midi = Math.round((seq.rootMidi || 60) + (step.offset || 0))
+      const velocity = clampValue(step.velocity ?? 1, 0, 1)
       // Trigger note bypassing ARP
       this.arpBypass = true
-      try { this.noteOn(midi) } finally { this.arpBypass = false }
+      try { this.noteOn(midi, velocity) } finally { this.arpBypass = false }
       this.seqLastNote = midi
+
+      const token = ++this.seqControlToken
+      this.updateControlSource('seqStep', velocity * 2 - 1)
 
       const gate = Math.max(0.05, Math.min(1, seq.gate ?? 0.6))
       const offMs = (this.seqCurrentStepMs || this.getSeqStepMs()) * gate
       setTimeout(() => {
         this.arpBypass = true
         try { this.noteOff(midi) } finally { this.arpBypass = false }
+        if (this.seqControlToken === token) {
+          this.updateControlSource('seqStep', 0)
+        }
       }, offMs)
+    } else {
+      this.updateControlSource('seqStep', 0)
     }
   }
 
@@ -2151,7 +2496,7 @@ export class SynthEngine {
 
   previewNote(midi: number, ms = 150) {
     this.arpBypass = true
-    try { this.noteOn(midi) } finally { this.arpBypass = false }
+    try { this.noteOn(midi, 1) } finally { this.arpBypass = false }
     setTimeout(() => {
       this.arpBypass = true
       try { this.noteOff(midi) } finally { this.arpBypass = false }
@@ -2159,7 +2504,7 @@ export class SynthEngine {
   }
 
   // Override noteOn/noteOff to integrate ARP
-  noteOn(midi: number) {
+  noteOn(midi: number, velocity = 1) {
     if (this.patch.arp?.enabled && !this.arpBypass) {
       this.arpHeld.add(midi)
       this.updateArpScheduler()
@@ -2168,6 +2513,10 @@ export class SynthEngine {
     const freq = 440 * Math.pow(2, (midi - 69) / 12)
     const voice = this.makeVoice(freq)
     this.activeVoices.set(midi, voice)
+    const velNorm = clampValue(velocity, 0, 1)
+    this.activeNoteVelocities.set(midi, velNorm)
+    this.refreshVelocitySignals()
+    this.refreshMixAudioConnections()
   }
 
   noteOff(midi: number) {
@@ -2191,6 +2540,12 @@ export class SynthEngine {
       v.stop(this.ctx.currentTime)
       this.activeVoices.delete(midi)
     }
+    if (!this.arpBypass) {
+      this.activeNoteVelocities.delete(midi)
+    } else {
+      this.activeNoteVelocities.delete(midi)
+    }
+    this.refreshVelocitySignals()
   }
 
   arpClear() {
