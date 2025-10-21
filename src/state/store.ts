@@ -129,6 +129,11 @@ export type State = {
   importPatch: (json: string) => void
   exportPatch: () => string
   saveUserPreset: (name: string, description?: string) => string | null
+  overwriteUserPreset: (
+    id: string,
+    changes?: { name?: string; description?: string; updatePatch?: boolean },
+  ) => boolean
+  deleteUserPreset: (id: string) => boolean
   setMidiSupported: (supported: boolean) => void
   setMidiStatus: (status: MidiStatus, error?: string | null) => void
   setMidiEnabled: (enabled: boolean) => void
@@ -290,6 +295,41 @@ export const useStore = create<State>()(
           return { userPresets: [...state.userPresets, nextPreset] }
         })
         return createdId
+      },
+      overwriteUserPreset: (id, changes) => {
+        const requestedName = changes?.name?.trim()
+        const requestedDescription = changes?.description?.trim()
+        const shouldUpdatePatch = changes?.updatePatch ?? true
+        let updated = false
+        set((state) => {
+          const index = state.userPresets.findIndex((preset) => preset.id === id)
+          if (index === -1) return {}
+          const nextPresets = [...state.userPresets]
+          const current = nextPresets[index]
+          const nextName = requestedName && requestedName.length > 0 ? requestedName : current.name
+          const nextDescription = requestedDescription !== undefined
+            ? (requestedDescription.length > 0 ? requestedDescription : 'Custom preset')
+            : current.description
+          const nextPatch = shouldUpdatePatch ? clonePatch(state.patch) : current.patch
+          nextPresets[index] = {
+            ...current,
+            name: nextName,
+            description: nextDescription,
+            patch: nextPatch,
+          }
+          updated = true
+          return { userPresets: nextPresets }
+        })
+        return updated
+      },
+      deleteUserPreset: (id) => {
+        let deleted = false
+        set((state) => {
+          if (!state.userPresets.some((preset) => preset.id === id)) return {}
+          deleted = true
+          return { userPresets: state.userPresets.filter((preset) => preset.id !== id) }
+        })
+        return deleted
       },
       setMidiSupported: (supported) => set((state) => ({ midi: { ...state.midi, supported } })),
       setMidiStatus: (status, error = null) => set((state) => ({ midi: { ...state.midi, status, lastError: error } })),
