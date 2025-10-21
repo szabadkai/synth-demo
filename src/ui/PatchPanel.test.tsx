@@ -1,5 +1,5 @@
 import React from 'react'
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { PatchPanel } from './PatchPanel'
 import { useStore } from '../state/store'
@@ -15,6 +15,7 @@ const resetStore = () => {
     engine: null,
     patch: basePatch,
     samplerLibrary: [],
+    userPresets: [],
   }))
 }
 
@@ -34,6 +35,28 @@ describe('PatchPanel', () => {
     presetMeta.tags?.forEach((tag) => {
       expect(screen.getByText(tag)).toBeTruthy()
     })
+  })
+
+  it('saves the current patch as a custom preset', () => {
+    const promptSpy = vi.spyOn(window, 'prompt')
+    promptSpy.mockImplementationOnce(() => 'My Custom')
+    promptSpy.mockImplementationOnce(() => 'A mellow sound')
+
+    render(<PatchPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: /save preset/i }))
+
+    const state = useStore.getState()
+    expect(state.userPresets).toHaveLength(1)
+    const saved = state.userPresets[0]
+    expect(saved.name).toBe('My Custom')
+    expect(saved.description).toBe('A mellow sound')
+
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('user-my-custom')
+    expect(screen.getByText('A mellow sound')).toBeTruthy()
+
+    promptSpy.mockRestore()
   })
 
   it('updates the store patch when selecting a different preset', () => {

@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { useStore, type State } from '../state/store'
+import type { Patch } from '../audio-engine/engine'
 import {
   presets,
   presetGroups,
@@ -11,6 +12,8 @@ export function PatchPanel() {
   const updatePatch = useStore((s: State) => s.updatePatch)
   const exportPatch = useStore((s: State) => s.exportPatch)
   const importPatch = useStore((s: State) => s.importPatch)
+  const saveUserPreset = useStore((s: State) => s.saveUserPreset)
+  const userPresets = useStore((s: State) => s.userPresets)
   const fileRef = useRef<HTMLInputElement>(null)
   const [selectedPresetId, setSelectedPresetId] = useState<string>(DEFAULT_PRESET_ID)
 
@@ -36,13 +39,27 @@ export function PatchPanel() {
   }
 
   const selectedPreset = useMemo(() => presetIndex[selectedPresetId], [selectedPresetId])
+  const selectedUserPreset = useMemo(
+    () => userPresets.find((preset) => preset.id === selectedPresetId),
+    [selectedPresetId, userPresets],
+  )
 
   const handleSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const id = event.target.value
     setSelectedPresetId(id)
     event.target.blur()
     const preset = presets[id]
-    if (preset) updatePatch(preset)
+    if (preset) {
+      updatePatch(preset)
+      return
+    }
+    const customPreset = userPresets.find((item) => item.id === id)
+    if (customPreset) {
+      const cloned: Patch = typeof structuredClone === 'function'
+        ? structuredClone(customPreset.patch)
+        : JSON.parse(JSON.stringify(customPreset.patch))
+      updatePatch(cloned)
+    }
   }
 
   return (
@@ -58,10 +75,32 @@ export function PatchPanel() {
               ))}
             </optgroup>
           ))}
+          {userPresets.length > 0 && (
+            <optgroup label="Custom Presets">
+              {userPresets.map((preset) => (
+                <option key={preset.id} value={preset.id} title={preset.description}>
+                  {preset.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
         <button onClick={() => fileRef.current?.click()}>Import</button>
         <input ref={fileRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={onImport} />
         <button onClick={download}>Export</button>
+        <button
+          onClick={() => {
+            const name = window.prompt('Name your preset')
+            if (!name) return
+            const description = window.prompt('Description (optional)')
+            const id = saveUserPreset(name, description ?? undefined)
+            if (id) {
+              setSelectedPresetId(id)
+            }
+          }}
+        >
+          Save Preset
+        </button>
         <button
           onClick={() => {
             setSelectedPresetId(DEFAULT_PRESET_ID)
@@ -82,10 +121,10 @@ export function PatchPanel() {
       </div>
       <div className="preset-panel-meta">
         <div className="label">Presets &amp; Patch IO</div>
-        {selectedPreset && (
+        {(selectedPreset || selectedUserPreset) && (
           <div className="preset-description">
-            <p>{selectedPreset.description}</p>
-            {selectedPreset.tags && selectedPreset.tags.length > 0 && (
+            <p>{selectedPreset ? selectedPreset.description : selectedUserPreset?.description}</p>
+            {selectedPreset?.tags && selectedPreset.tags.length > 0 && (
               <div className="preset-tags">
                 {selectedPreset.tags.map((tag) => (
                   <span key={tag} className="preset-tag">

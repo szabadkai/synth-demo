@@ -1,15 +1,34 @@
 import React from 'react'
 import { useStore, type State } from '../state/store'
+import type { Patch } from '../audio-engine/engine'
 import { presetGroups, presetIndex } from '../patches/presets'
 
 export function PresetSelector() {
   const updatePatch = useStore((s: State) => s.updatePatch)
+  const userPresets = useStore((s: State) => s.userPresets)
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const [open, setOpen] = React.useState(false)
   const triggerRef = React.useRef<HTMLButtonElement>(null)
   const listRef = React.useRef<HTMLDivElement>(null)
 
   const selectedPreset = selectedId ? presetIndex[selectedId] : null
+  const selectedCustom = selectedId ? userPresets.find((preset) => preset.id === selectedId) : undefined
+
+  const activeDisplay = selectedPreset
+    ? {
+        id: selectedPreset.id,
+        name: selectedPreset.name,
+        description: selectedPreset.description,
+        image: selectedPreset.image,
+      }
+    : selectedCustom
+      ? {
+          id: selectedCustom.id,
+          name: selectedCustom.name,
+          description: selectedCustom.description,
+          image: undefined,
+        }
+      : null
 
   const closeMenu = React.useCallback(() => {
     setOpen(false)
@@ -21,9 +40,19 @@ export function PresetSelector() {
       setSelectedId(id)
       closeMenu()
       const preset = presetIndex[id]
-      if (preset) updatePatch(preset.patch)
+      if (preset) {
+        updatePatch(preset.patch)
+        return
+      }
+      const customPreset = userPresets.find((item) => item.id === id)
+      if (customPreset) {
+        const cloned: Patch = typeof structuredClone === 'function'
+          ? structuredClone(customPreset.patch)
+          : JSON.parse(JSON.stringify(customPreset.patch))
+        updatePatch(cloned)
+      }
     },
-    [closeMenu, updatePatch],
+    [closeMenu, updatePatch, userPresets],
   )
 
   React.useEffect(() => {
@@ -57,6 +86,13 @@ export function PresetSelector() {
     }
   }
 
+  React.useEffect(() => {
+    if (!selectedId) return
+    if (presetIndex[selectedId]) return
+    if (userPresets.some((preset) => preset.id === selectedId)) return
+    setSelectedId(null)
+  }, [selectedId, userPresets])
+
   return (
     <div className="preset-selector" data-open={open ? 'true' : 'false'}>
       <button
@@ -67,13 +103,13 @@ export function PresetSelector() {
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        {selectedPreset ? (
+        {activeDisplay ? (
           <span className="preset-selector-label">
             <span
               className="preset-selector-thumb"
-              style={{ backgroundImage: `url(${selectedPreset.image})` }}
+              style={activeDisplay.image ? { backgroundImage: `url(${activeDisplay.image})` } : undefined}
             />
-            <span>{selectedPreset.name}</span>
+            <span>{activeDisplay.name}</span>
           </span>
         ) : (
           <span className="preset-selector-placeholder">Presets</span>
@@ -110,6 +146,28 @@ export function PresetSelector() {
               </div>
             </div>
           ))}
+          {userPresets.length > 0 && (
+            <div className="preset-selector-group">
+              <div className="preset-selector-group-title">Custom Presets</div>
+              <div className="preset-selector-options">
+                {userPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    role="option"
+                    aria-selected={preset.id === selectedId}
+                    className="preset-option"
+                    onClick={() => handleSelect(preset.id)}
+                  >
+                    <div className="preset-option-overlay">
+                      <div className="preset-option-name">{preset.name}</div>
+                      <div className="preset-option-description">{preset.description}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

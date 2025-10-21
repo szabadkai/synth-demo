@@ -78,6 +78,8 @@ const normalizeModMatrix = (rows: Partial<ModMatrixRow>[]): ModMatrixRow[] => {
   })
 }
 
+const clonePatch = (patch: Patch): Patch => JSON.parse(JSON.stringify(patch))
+
 export type MidiDeviceInfo = {
   id: string
   name: string
@@ -86,9 +88,18 @@ export type MidiDeviceInfo = {
 
 export type MidiStatus = 'idle' | 'requesting' | 'ready' | 'error' | 'unsupported'
 
+export type UserPreset = {
+  id: string
+  name: string
+  description: string
+  createdAt: string
+  patch: Patch
+}
+
 export type State = {
   engine: SynthEngine | null
   patch: Patch
+  userPresets: UserPreset[]
   samplerLibrary: SamplerSettings[]
   layoutOrder: string[]
   oscilloscope: {
@@ -117,6 +128,7 @@ export type State = {
   bumpTransportTick: () => void
   importPatch: (json: string) => void
   exportPatch: () => string
+  saveUserPreset: (name: string, description?: string) => string | null
   setMidiSupported: (supported: boolean) => void
   setMidiStatus: (status: MidiStatus, error?: string | null) => void
   setMidiEnabled: (enabled: boolean) => void
@@ -141,6 +153,7 @@ export const useStore = create<State>()(
     (set, get) => ({
       engine: null,
       patch: defaultPatch,
+      userPresets: [],
       samplerLibrary: [],
       layoutOrder: [],
       oscilloscope: { fftSize: 4096 },
@@ -248,6 +261,36 @@ export const useStore = create<State>()(
         set({ patch: merged })
       },
       exportPatch: () => JSON.stringify(get().patch, null, 2),
+      saveUserPreset: (name, description) => {
+        const trimmedName = name.trim()
+        if (!trimmedName) return null
+        const trimmedDescription = (description ?? '').trim()
+        let createdId: string | null = null
+        set((state) => {
+          const baseSlug = trimmedName
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+          const baseId = baseSlug.length > 0 ? `user-${baseSlug}` : `user-${Date.now().toString(36)}`
+          const existingIds = new Set(state.userPresets.map((preset) => preset.id))
+          let candidate = baseId
+          let suffix = 1
+          while (existingIds.has(candidate)) {
+            candidate = `${baseId}-${suffix++}`
+          }
+          createdId = candidate
+          const snapshot = clonePatch(state.patch)
+          const nextPreset: UserPreset = {
+            id: candidate,
+            name: trimmedName,
+            description: trimmedDescription.length > 0 ? trimmedDescription : 'Custom preset',
+            createdAt: new Date().toISOString(),
+            patch: snapshot,
+          }
+          return { userPresets: [...state.userPresets, nextPreset] }
+        })
+        return createdId
+      },
       setMidiSupported: (supported) => set((state) => ({ midi: { ...state.midi, supported } })),
       setMidiStatus: (status, error = null) => set((state) => ({ midi: { ...state.midi, status, lastError: error } })),
       setMidiEnabled: (enabled) => set((state) => ({ midi: { ...state.midi, enabled } })),
@@ -416,6 +459,7 @@ export const useStore = create<State>()(
           sequencer: state.patch.sequencer ? { ...state.patch.sequencer, playing: false } : state.patch.sequencer,
           arp: state.patch.arp ? { ...state.patch.arp, bpmSync: state.patch.arp.bpmSync ?? true } : state.patch.arp,
         },
+        userPresets: state.userPresets,
         samplerLibrary: state.samplerLibrary,
         layoutOrder: state.layoutOrder,
         tempo: state.tempo,
@@ -482,6 +526,29 @@ export const useStore = create<State>()(
               id: typeof item?.id === 'string' ? item.id : `legacy-${Date.now()}-${index}`,
             }))
           : []
+        const userPresets = Array.isArray(persistedState?.userPresets)
+          ? (persistedState.userPresets as any[]).map((item, index) => {
+              const name = typeof item?.name === 'string' && item.name.trim().length > 0
+                ? item.name.trim()
+                : `Custom Preset ${index + 1}`
+              const description = typeof item?.description === 'string' ? item.description : 'Custom preset'
+              const id = typeof item?.id === 'string' && item.id.trim().length > 0
+                ? item.id.trim()
+                : `user-${Date.now()}-${index}`
+              const createdAt = typeof item?.createdAt === 'string' ? item.createdAt : new Date().toISOString()
+              const rawPatch = item?.patch && typeof item.patch === 'object' ? item.patch : defaultPatch
+              const patch: Patch = {
+                ...defaultPatch,
+                ...(rawPatch as Partial<Patch>),
+              }
+              patch.osc1 = normalizeOscillator(patch.osc1)
+              patch.osc2 = normalizeOscillator(patch.osc2)
+              patch.modMatrix = Array.isArray((rawPatch as any)?.modMatrix)
+                ? normalizeModMatrix((rawPatch as any).modMatrix as Partial<ModMatrixRow>[])
+                : (patch.modMatrix ?? []).map((row) => ({ ...row }))
+              return { id, name, description, createdAt, patch }
+            })
+          : []
         const allowedFft = [1024, 2048, 4096, 8192] as const
         const persistedFft = persistedState?.oscilloscope?.fftSize
         const fftSize: typeof allowedFft[number] = allowedFft.includes(persistedFft)
@@ -491,6 +558,7 @@ export const useStore = create<State>()(
           ...persistedState,
           patch: migratedPatch,
           samplerLibrary: library,
+          userPresets,
           layoutOrder,
           tempo,
           transport: migratedTransport,
@@ -529,6 +597,7 @@ export const useStore = create<State>()(
             activeNotes: [],
           }
         }
+        if (!Array.isArray(state.userPresets)) state.userPresets = []
       },
     }
   )
