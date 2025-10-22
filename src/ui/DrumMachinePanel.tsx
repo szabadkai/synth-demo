@@ -353,13 +353,10 @@ export function DrumMachinePanel() {
 
   useEffect(() => {
     enabledRef.current = enabled
-    if (!enabled && playing) {
-      setPlayingGlobal(false)
-    }
     if (!enabled) {
       setStep(0)
     }
-  }, [enabled, playing, setPlayingGlobal])
+  }, [enabled])
 
   const applyVoicePatch = (instrumentId: string, voiceIndex: number, engine?: SynthEngine) => {
     const inst = INSTRUMENTS.find((item) => item.id === instrumentId)
