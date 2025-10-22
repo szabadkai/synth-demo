@@ -82,6 +82,12 @@ export type ModMatrixRow = {
   enabled: boolean
 }
 
+export type SequencerStep = {
+  on: boolean
+  offset: number
+  velocity: number
+}
+
 export type Patch = {
   osc1: OscillatorConfig
   osc2: OscillatorConfig
@@ -136,7 +142,13 @@ export type Patch = {
     gate: number
     rootMidi: number
     length: number
-    steps: Array<{ on: boolean; offset: number; velocity: number }>
+    steps: SequencerStep[]
+    autoGroove?: boolean
+    autoGrooveRepeat?: number
+    grooveStyle?: string
+    grooveChord?: string
+    progressionMode?: string
+    grooveBaseMidi?: number
   }
   expression?: {
     x: ExpressionTarget
@@ -144,6 +156,26 @@ export type Patch = {
   }
   modMatrix?: ModMatrixRow[]
 }
+
+export const MAX_SEQUENCER_STEPS = 64
+export const createEmptySequencerStep = (): SequencerStep => ({ on: false, offset: 0, velocity: 1 })
+
+export type SequencerProgression = {
+  id: string
+  label: string
+  offsets: number[]
+}
+
+export const SEQUENCER_PROGRESSIONS: SequencerProgression[] = [
+  { id: 'static', label: 'Static', offsets: [0] },
+  { id: 'i-iv-v', label: 'I - IV - V', offsets: [0, 5, 7] },
+  { id: 'i-v-vi-iv', label: 'I - V - vi - IV', offsets: [0, 7, 9, 5] },
+  { id: 'ii-v-i', label: 'ii - V - I', offsets: [2, 7, 0] },
+  { id: 'vi-iv-i-v', label: 'vi - IV - I - V', offsets: [9, 5, 0, 7] },
+  { id: 'blues', label: 'Blues I - IV - V', offsets: [0, 5, 7, 0] },
+  { id: 'modal-dorian', label: 'Modal Dorian', offsets: [0, 2, 3, 5] },
+  { id: 'chromatic-rise', label: 'Chromatic Rise', offsets: [0, 1, 2, 3, 4, 5] },
+]
 
 export const DEFAULT_OSCILLATOR_MACRO: MacroSettings = {
   model: 'va',
@@ -217,7 +249,9 @@ export const defaultPatch: Patch = {
     gate: 0.6,
     rootMidi: 60,
     length: 16,
-    steps: Array.from({ length: 16 }, () => ({ on: false, offset: 0, velocity: 1 })),
+    steps: Array.from({ length: MAX_SEQUENCER_STEPS }, () => createEmptySequencerStep()),
+    progressionMode: 'static',
+    grooveBaseMidi: 60,
   },
   expression: { x: 'osc1.detune', y: 'filter.cutoff' },
   modMatrix: [],
@@ -518,6 +552,8 @@ export class SynthEngine {
   private seqStepIndex = 0
   private seqLastNote: number | null = null
   private seqControlToken = 0
+  private seqCurrentRoot = defaultPatch.sequencer?.rootMidi ?? 60
+  private seqProgressionIndex = 0
 
   private getModSourceIndex(source: ModSource): number {
     switch (source) {
@@ -1059,6 +1095,11 @@ export class SynthEngine {
     }
 
     this.patch = next
+    if (p.sequencer !== undefined) {
+      const seqRoot = next.sequencer?.rootMidi ?? defaultPatch.sequencer!.rootMidi
+      this.seqCurrentRoot = clampValue(seqRoot, 0, 127)
+      this.seqProgressionIndex = 0
+    }
 
     if (p.sampler !== undefined) {
       void this.updateSamplerBuffer(next.sampler)
@@ -2394,6 +2435,36 @@ export class SynthEngine {
   }
 
   // --- Sequencer helpers ---
+  private getSequencerProgression(mode?: string) {
+    const id = typeof mode === 'string' && mode.length > 0 ? mode : 'static'
+    return SEQUENCER_PROGRESSIONS.find((entry) => entry.id === id) ?? null
+  }
+
+  private getSequencerBaseRoot(seq: NonNullable<Patch['sequencer']>) {
+    const raw = Number.isFinite(seq.grooveBaseMidi) ? seq.grooveBaseMidi! : seq.rootMidi
+    const finite = Number.isFinite(raw) ? raw : defaultPatch.sequencer!.rootMidi
+    return clampValue(Math.round(finite), 0, 127)
+  }
+
+  private resetSequencerProgression() {
+    const seq = this.patch.sequencer!
+    this.seqProgressionIndex = 0
+    this.seqCurrentRoot = clampValue(seq.rootMidi ?? defaultPatch.sequencer!.rootMidi, 0, 127)
+  }
+
+  private advanceSequencerProgression() {
+    const seq = this.patch.sequencer!
+    const progression = this.getSequencerProgression(seq.progressionMode)
+    if (!progression || progression.offsets.length === 0 || progression.id === 'static') {
+      this.resetSequencerProgression()
+      return
+    }
+    const baseRoot = this.getSequencerBaseRoot(seq)
+    const offset = progression.offsets[this.seqProgressionIndex % progression.offsets.length]
+    this.seqCurrentRoot = clampValue(baseRoot + offset, 0, 127)
+    this.seqProgressionIndex = (this.seqProgressionIndex + 1) % progression.offsets.length
+  }
+
   private getSeqStepMs() {
     const seq = this.patch.sequencer!
     const bpm = Math.max(20, Math.min(300, seq.bpm || 120))
@@ -2414,6 +2485,8 @@ export class SynthEngine {
       if (this.seqTimer != null) { clearTimeout(this.seqTimer); this.seqTimer = null }
       this.seqPhase = 0
       this.seqStepIndex = 0
+      this.seqProgressionIndex = 0
+      this.seqCurrentRoot = clampValue(seq.rootMidi ?? defaultPatch.sequencer!.rootMidi, 0, 127)
       this.scheduleNextSeqTick()
     } else {
       if (this.seqTimer != null) { clearTimeout(this.seqTimer); this.seqTimer = null }
@@ -2424,6 +2497,7 @@ export class SynthEngine {
         this.seqLastNote = null
       }
       this.updateControlSource('seqStep', 0)
+      this.resetSequencerProgression()
     }
   }
 
@@ -2452,6 +2526,14 @@ export class SynthEngine {
     const i = this.seqStepIndex % len
     const step = seq.steps[i] || { on: false, offset: 0, velocity: 1 }
     this.seqStepIndex = (this.seqStepIndex + 1) % len
+    if (i === 0) {
+      this.advanceSequencerProgression()
+    }
+    const rootMidi = clampValue(
+      Number.isFinite(this.seqCurrentRoot) ? this.seqCurrentRoot : (seq.rootMidi ?? defaultPatch.sequencer!.rootMidi),
+      0,
+      127,
+    )
 
     // Stop previous sustained note if gate >= 1
     if (this.seqLastNote != null && (seq.gate ?? 0.6) >= 1) {
@@ -2462,7 +2544,7 @@ export class SynthEngine {
     }
 
     if (step.on) {
-      const midi = Math.round((seq.rootMidi || 60) + (step.offset || 0))
+      const midi = Math.round(rootMidi + (step.offset || 0))
       const velocity = clampValue(step.velocity ?? 1, 0, 1)
       // Trigger note bypassing ARP
       this.arpBypass = true
@@ -2491,7 +2573,12 @@ export class SynthEngine {
     const enabled = !!seq.enabled && !!seq.playing
     const length = Math.max(0, Math.min(seq.steps.length, seq.length))
     const stepIndex = enabled && length > 0 ? (this.seqStepIndex + length - 1) % length : 0
-    return { enabled, stepIndex, length }
+    const currentRoot = clampValue(
+      Number.isFinite(this.seqCurrentRoot) ? this.seqCurrentRoot : (seq.rootMidi ?? defaultPatch.sequencer!.rootMidi),
+      0,
+      127,
+    )
+    return { enabled, stepIndex, length, currentRoot }
   }
 
   previewNote(midi: number, ms = 150) {

@@ -1333,6 +1333,19 @@ input[type="range"][disabled] {
   flex-wrap: wrap;
 }
 
+.drum-enable-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.drum-enable-toggle input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
 .tempo-control {
   display: flex;
   align-items: center;

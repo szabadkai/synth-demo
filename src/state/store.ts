@@ -5,6 +5,8 @@ import {
   defaultPatch,
   DEFAULT_OSCILLATOR_MACRO,
   DEFAULT_OSCILLATOR_SAMPLER,
+  MAX_SEQUENCER_STEPS,
+  createEmptySequencerStep,
 } from '../audio-engine/engine'
 import type {
   Patch,
@@ -79,6 +81,29 @@ const normalizeModMatrix = (rows: Partial<ModMatrixRow>[]): ModMatrixRow[] => {
 }
 
 const clonePatch = (patch: Patch): Patch => JSON.parse(JSON.stringify(patch))
+
+const normalizeSequencer = (seq?: Patch['sequencer']): NonNullable<Patch['sequencer']> => {
+  const fallback = defaultPatch.sequencer as NonNullable<Patch['sequencer']>
+  const base = { ...fallback, ...(seq ?? {}) } as NonNullable<Patch['sequencer']>
+  const rawLength = Number.isFinite(base.length) ? Number(base.length) : defaultPatch.sequencer!.length
+  const length = Math.max(1, Math.min(rawLength, MAX_SEQUENCER_STEPS))
+  const rawRoot = Number.isFinite(base.rootMidi) ? Number(base.rootMidi) : fallback.rootMidi
+  const rootMidi = clamp(Math.round(rawRoot), 0, 127)
+  const rawBaseMidi = Number.isFinite(base.grooveBaseMidi) ? Number(base.grooveBaseMidi) : rootMidi
+  const grooveBaseMidi = clamp(Math.round(rawBaseMidi), 0, 127)
+  const progressionMode =
+    typeof base.progressionMode === 'string' && base.progressionMode.length > 0 ? base.progressionMode : 'static'
+  const rawSteps = Array.isArray(base.steps) ? base.steps : []
+  const steps = rawSteps.slice(0, MAX_SEQUENCER_STEPS).map((step) => ({
+    on: !!step?.on,
+    offset: clamp(Number.isFinite(step?.offset) ? Number(step.offset) : 0, -24, 24),
+    velocity: clamp(Number.isFinite(step?.velocity) ? Number(step.velocity) : 1, 0, 1),
+  }))
+  while (steps.length < MAX_SEQUENCER_STEPS) {
+    steps.push(createEmptySequencerStep())
+  }
+  return { ...base, length, steps, rootMidi, grooveBaseMidi, progressionMode }
+}
 
 export type MidiDeviceInfo = {
   id: string
@@ -211,6 +236,13 @@ export const useStore = create<State>()(
         next.engineMode = derivedEngineMode
 
         const enginePatch: Partial<Patch> = { ...p }
+        if (next.sequencer) {
+          const normalizedSeq = normalizeSequencer(next.sequencer)
+          next.sequencer = normalizedSeq
+          if ((p as any).sequencer !== undefined) {
+            enginePatch.sequencer = normalizedSeq
+          }
+        }
         if (requestedEngineMode !== undefined || (prevPatch.engineMode ?? 'classic') !== derivedEngineMode) {
           enginePatch.engineMode = derivedEngineMode
         }
@@ -262,6 +294,9 @@ export const useStore = create<State>()(
         }
         merged.osc1 = normalizeOscillator(merged.osc1)
         merged.osc2 = normalizeOscillator(merged.osc2)
+        if (merged.sequencer) {
+          merged.sequencer = normalizeSequencer(merged.sequencer)
+        }
         get().engine?.applyPatch(merged)
         set({ patch: merged })
       },
@@ -541,6 +576,9 @@ export const useStore = create<State>()(
             ? normalizeModMatrix(p.modMatrix as Partial<ModMatrixRow>[])
             : [],
         }
+        if (migratedPatch.sequencer) {
+          migratedPatch.sequencer = normalizeSequencer(migratedPatch.sequencer)
+        }
         const layoutOrder: string[] = Array.isArray(persistedState?.layoutOrder)
           ? persistedState.layoutOrder.filter((id: unknown) => typeof id === 'string')
           : []
@@ -583,6 +621,9 @@ export const useStore = create<State>()(
               }
               patch.osc1 = normalizeOscillator(patch.osc1)
               patch.osc2 = normalizeOscillator(patch.osc2)
+              if (patch.sequencer) {
+                patch.sequencer = normalizeSequencer(patch.sequencer)
+              }
               patch.modMatrix = Array.isArray((rawPatch as any)?.modMatrix)
                 ? normalizeModMatrix((rawPatch as any).modMatrix as Partial<ModMatrixRow>[])
                 : (patch.modMatrix ?? []).map((row) => ({ ...row }))
