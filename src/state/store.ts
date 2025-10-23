@@ -93,6 +93,8 @@ const normalizeSequencer = (seq?: Patch['sequencer']): NonNullable<Patch['sequen
   const grooveBaseMidi = clamp(Math.round(rawBaseMidi), 0, 127)
   const progressionMode =
     typeof base.progressionMode === 'string' && base.progressionMode.length > 0 ? base.progressionMode : 'static'
+  const spiceAmount = clamp(Number.isFinite(base.spiceAmount) ? Number(base.spiceAmount) : 0, 0, 1)
+  const spiceSeed = typeof base.spiceSeed === 'string' ? base.spiceSeed : undefined
   const rawSteps = Array.isArray(base.steps) ? base.steps : []
   const steps = rawSteps.slice(0, MAX_SEQUENCER_STEPS).map((step) => ({
     on: !!step?.on,
@@ -102,7 +104,7 @@ const normalizeSequencer = (seq?: Patch['sequencer']): NonNullable<Patch['sequen
   while (steps.length < MAX_SEQUENCER_STEPS) {
     steps.push(createEmptySequencerStep())
   }
-  return { ...base, length, steps, rootMidi, grooveBaseMidi, progressionMode }
+  return { ...base, length, steps, rootMidi, grooveBaseMidi, progressionMode, spiceAmount, spiceSeed }
 }
 
 export type MidiDeviceInfo = {
