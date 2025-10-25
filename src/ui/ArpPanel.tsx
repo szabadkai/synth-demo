@@ -4,8 +4,8 @@ import { defaultPatch } from '../audio-engine/engine'
 import type { Patch } from '../audio-engine/engine'
 import { Knob } from './controls/Knob'
 
-const MODE_OPTIONS = ['up', 'down', 'updown', 'random', 'asplayed'] as const
-const MODE_LABELS = ['Up', 'Down', 'Up-Down', 'Random', 'As Played']
+const MODE_OPTIONS = ['up', 'down', 'updown', 'random', 'asplayed', 'sequence'] as const
+const MODE_LABELS = ['Up', 'Down', 'Up-Down', 'Random', 'As Played', 'Sequence']
 const CHORD_OPTIONS = ['none', 'power', 'major', 'minor', 'sus2', 'sus4', 'maj7', 'min7', 'sequencer'] as const
 const CHORD_LABELS = ['Single', 'Power', 'Major', 'Minor', 'Sus2', 'Sus4', 'Maj7', 'Min7', 'Seq']
 const DIVISION_OPTIONS = ['1/4', '1/8', '1/8T', '1/16', '1/16T'] as const
@@ -119,7 +119,7 @@ export function ArpPanel() {
             const idx = Math.round(v)
             const value = CHORD_OPTIONS[idx]
             if (value === 'sequencer') {
-              setArp({ chordSource: 'sequencer' })
+              setArp({ chordSource: 'sequencer', chord: 'none' })
             } else {
               setArp({ chordSource: 'preset', chord: value as NonNullable<Patch['arp']>['chord'] })
             }

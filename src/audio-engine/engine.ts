@@ -141,7 +141,7 @@ export type Patch = {
     // Playback
     gate: number
     chordSource?: 'preset' | 'sequencer'
-    mode: 'up' | 'down' | 'updown' | 'random' | 'asplayed'
+    mode: 'up' | 'down' | 'updown' | 'random' | 'asplayed' | 'sequence'
     octaves: number
     chord?: 'none' | 'power' | 'major' | 'minor' | 'sus2' | 'sus4' | 'maj7' | 'min7'
     latch: boolean
@@ -2279,6 +2279,45 @@ export class SynthEngine {
   private buildArpPool(): number[] {
     if (this.arpHeld.size === 0) return []
     const mode = this.patch.arp?.mode ?? 'up'
+
+    // Special handling for sequence mode - play through sequencer pattern
+    if (mode === 'sequence') {
+      const seq = this.patch.sequencer ?? defaultPatch.sequencer!
+      const steps = seq.steps ?? []
+      const length = Math.max(1, Math.min(steps.length, seq.length))
+      const base = Array.from(this.arpHeld.values()).sort((a, b) => a - b)
+      const oct = Math.max(1, Math.min(4, this.patch.arp?.octaves ?? 1))
+      const pool: number[] = []
+
+      // Build pool by stepping through the sequence pattern
+      // Use -1 to represent a rest/pause for steps that are OFF
+      for (let i = 0; i < length; i++) {
+        const step = steps[i]
+        if (step?.on) {
+          const offset = Math.round(step.offset ?? 0)
+          for (let o = 0; o < oct; o++) {
+            for (const n of base) {
+              const midi = n + o * 12 + offset
+              if (midi >= 0 && midi <= 127) {
+                pool.push(midi)
+              } else {
+                pool.push(-1) // Rest if out of range
+              }
+            }
+          }
+        } else {
+          // Step is OFF - add a rest for each octave/note combination
+          for (let o = 0; o < oct; o++) {
+            for (const n of base) {
+              pool.push(-1) // Rest
+            }
+          }
+        }
+      }
+      return pool
+    }
+
+    // Normal arp modes
     const base = mode === 'asplayed' ? Array.from(this.arpHeld.values()) : Array.from(this.arpHeld.values()).sort((a, b) => a - b)
     const oct = Math.max(1, Math.min(4, this.patch.arp?.octaves ?? 1))
     const pool: number[] = []
@@ -2411,9 +2450,20 @@ export class SynthEngine {
       this.arpRepeatCounter = 0
     }
 
-    // Stop previous if gate < 1 (avoid overhang). We'll still allow envelope release.
-    if (this.arpLastNote != null && (this.patch.arp?.gate ?? 0.6) >= 1) {
-      // keep sustained until next explicit stop
+    // Check if this is a rest (midi = -1 in sequence mode)
+    const isRest = midi < 0
+
+    // Stop previous note if gate < 1 or if this is a rest
+    if (this.arpLastNote != null && (isRest || (this.patch.arp?.gate ?? 0.6) < 1)) {
+      const toOff = this.arpLastNote
+      this.arpBypass = true
+      try { this.noteOff(toOff) } finally { this.arpBypass = false }
+      this.arpLastNote = null
+    }
+
+    // If this is a rest, don't play a note
+    if (isRest) {
+      return
     }
 
     // Play now
