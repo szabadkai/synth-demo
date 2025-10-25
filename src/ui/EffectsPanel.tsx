@@ -17,7 +17,7 @@ export function EffectsPanel() {
           checked={fx.delay.enabled}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ effects: { ...fx, delay: { ...fx.delay, enabled: e.target.checked } } })}
         />
-        <span className="label">Enabled</span>
+        <span className="label">On</span>
       </label>
         <div className="effects-knobs">
           <Knob label="Time" min={0} max={1.5} step={0.01} value={fx.delay.time} onChange={(v: number) => update({ effects: { ...fx, delay: { ...fx.delay, time: v } } })} disabled={!fx.delay.enabled} />
@@ -34,7 +34,7 @@ export function EffectsPanel() {
           checked={fx.reverb.enabled}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ effects: { ...fx, reverb: { ...fx.reverb, enabled: e.target.checked } } })}
         />
-        <span className="label">Enabled</span>
+        <span className="label">On</span>
       </label>
         <div className="effects-knobs">
           <Knob label="Size" min={0} max={1} step={0.01} value={fx.reverb.size} onChange={(v: number) => update({ effects: { ...fx, reverb: { ...fx.reverb, size: v } } })} disabled={!fx.reverb.enabled} />

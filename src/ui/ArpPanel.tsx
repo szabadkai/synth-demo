@@ -4,6 +4,12 @@ import { defaultPatch } from '../audio-engine/engine'
 import type { Patch } from '../audio-engine/engine'
 import { Knob } from './controls/Knob'
 
+const MODE_OPTIONS = ['up', 'down', 'updown', 'random', 'asplayed'] as const
+const MODE_LABELS = ['Up', 'Down', 'Up-Down', 'Random', 'As Played']
+const CHORD_OPTIONS = ['none', 'power', 'major', 'minor', 'sus2', 'sus4', 'maj7', 'min7', 'sequencer'] as const
+const CHORD_LABELS = ['Single', 'Power', 'Major', 'Minor', 'Sus2', 'Sus4', 'Maj7', 'Min7', 'Seq']
+const DIVISION_OPTIONS = ['1/4', '1/8', '1/8T', '1/16', '1/16T'] as const
+
 export function ArpPanel() {
   const patch = useStore((s: State) => s.patch)
   const update = useStore((s: State) => s.updatePatch)
@@ -30,6 +36,12 @@ export function ArpPanel() {
     return offsets.size
   }, [seq])
 
+  // Derive indices for knob values
+  const modeIndex = MODE_OPTIONS.indexOf(arp.mode)
+  const chordValue = chordSource === 'sequencer' ? 'sequencer' : (arp.chord ?? 'none')
+  const chordIndex = CHORD_OPTIONS.indexOf(chordValue as any)
+  const divisionIndex = DIVISION_OPTIONS.indexOf(arp.division)
+
   React.useEffect(() => {
     if (!engine) return
     const id = setInterval(() => {
@@ -40,100 +52,95 @@ export function ArpPanel() {
   }, [engine])
 
   return (
-    <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-      {/* Row 1: toggles + clear */}
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input
-          type="checkbox"
-          checked={arp.enabled}
-          onChange={(e) => update({ arp: { ...arp, enabled: e.target.checked } })}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Toggles and controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={arp.enabled}
+            onChange={(e) => update({ arp: { ...arp, enabled: e.target.checked } })}
+          />
+          <span className="label">On</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={arp.latch || false}
+            onChange={(e) => update({ arp: { ...arp, latch: e.target.checked } })}
+            disabled={!arp.enabled}
+          />
+          <span className="label">Latch</span>
+        </label>
+        <button
+          onClick={() => engine?.arpClear()}
+          disabled={!arp.enabled}
+          style={{
+            padding: '6px 10px', fontSize: 12, borderRadius: 6,
+            background: 'transparent', border: '1px solid var(--border, #2a3040)', color: 'var(--text)'
+          }}
+        >
+          Clear
+        </button>
+      </div>
+
+      {/* All knobs in one flexible row */}
+      <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Knob
+          label="Mode"
+          min={0}
+          max={MODE_OPTIONS.length - 1}
+          step={1}
+          value={modeIndex >= 0 ? modeIndex : 0}
+          onChange={(v) => {
+            const idx = Math.round(v)
+            const mode = MODE_OPTIONS[idx]
+            if (mode) setArp({ mode })
+          }}
+          disabled={!arp.enabled}
+          formatValue={(v) => MODE_LABELS[Math.round(v)] ?? 'Up'}
         />
-        <span className="label">Enabled</span>
-      </label>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input
-          type="checkbox"
-          checked={arp.latch || false}
-          onChange={(e) => update({ arp: { ...arp, latch: e.target.checked } })}
+        <Knob
+          label="Octaves"
+          min={1}
+          max={4}
+          step={1}
+          value={arp.octaves}
+          onChange={(v) => setArp({ octaves: Math.round(v) })}
           disabled={!arp.enabled}
         />
-        <span className="label">Latch</span>
-      </label>
-      <button
-        onClick={() => engine?.arpClear()}
-        disabled={!arp.enabled}
-        style={{
-          justifySelf: 'start', alignSelf: 'end',
-          padding: '6px 10px', fontSize: 12, borderRadius: 6,
-          background: 'transparent', border: '1px solid var(--border, #2a3040)', color: 'var(--text)'
-        }}
-      >
-        Clear
-      </button>
-
-      {/* Row 2: dropdowns */}
-      <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, alignItems: 'end' }}>
-        <label>
-          <div className="label">Mode</div>
-          <select value={arp.mode} onChange={(e) => update({ arp: { ...arp, mode: e.target.value as any } })} disabled={!arp.enabled}>
-            <option value="up">Up</option>
-            <option value="down">Down</option>
-            <option value="updown">Up-Down</option>
-            <option value="random">Random</option>
-            <option value="asplayed">As Played</option>
-          </select>
-        </label>
-        <label>
-          <div className="label">Octaves</div>
-          <select value={arp.octaves} onChange={(e) => update({ arp: { ...arp, octaves: Number(e.target.value) } })} disabled={!arp.enabled}>
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-            <option value={3}>3</option>
-            <option value={4}>4</option>
-          </select>
-        </label>
-        <label>
-          <div className="label">Chord</div>
-          <select
-            value={chordSource === 'sequencer' ? 'sequencer' : (arp.chord ?? 'none')}
-            onChange={(e) => {
-              const value = e.target.value as string
-              if (value === 'sequencer') {
-                setArp({ chordSource: 'sequencer' })
-              } else {
-                setArp({ chordSource: 'preset', chord: value as NonNullable<Patch['arp']>['chord'] })
-              }
-            }}
-            disabled={!arp.enabled}
-          >
-            <option value="none">Single</option>
-            <option value="power">Power (5th)</option>
-            <option value="major">Major Triad</option>
-            <option value="minor">Minor Triad</option>
-            <option value="sus2">Sus2</option>
-            <option value="sus4">Sus4</option>
-            <option value="maj7">Major 7th</option>
-            <option value="min7">Minor 7th</option>
-            <option value="sequencer">Sequencer Pattern</option>
-          </select>
-        </label>
-        <label>
-          <div className="label">Division</div>
-          <select value={arp.division} onChange={(e) => setArp({ division: e.target.value as any })} disabled={!arp.enabled}>
-            <option value="1/4">1/4</option>
-            <option value="1/8">1/8</option>
-            <option value="1/8T">1/8T</option>
-            <option value="1/16">1/16</option>
-            <option value="1/16T">1/16T</option>
-          </select>
-        </label>
-      </div>
-      {chordSource === 'sequencer' && (
-        <div className="hint-text" style={{ gridColumn: '1 / -1', fontSize: 12, opacity: 0.8, alignSelf: 'start' }}>
-          Sequencer pattern{sequencerChordCount > 0 ? ` • ${sequencerChordCount} interval${sequencerChordCount === 1 ? '' : 's'}` : ' • no active steps yet'}
-        </div>
-      )}
-      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 20, alignItems: 'center', justifyContent: 'flex-start', padding: '6px 0' }}>
+        <Knob
+          label="Chord"
+          min={0}
+          max={CHORD_OPTIONS.length - 1}
+          step={1}
+          value={chordIndex >= 0 ? chordIndex : 0}
+          onChange={(v) => {
+            const idx = Math.round(v)
+            const value = CHORD_OPTIONS[idx]
+            if (value === 'sequencer') {
+              setArp({ chordSource: 'sequencer' })
+            } else {
+              setArp({ chordSource: 'preset', chord: value as NonNullable<Patch['arp']>['chord'] })
+            }
+          }}
+          disabled={!arp.enabled}
+          formatValue={(v) => CHORD_LABELS[Math.round(v)] ?? 'Single'}
+        />
+        <Knob
+          label="Division"
+          min={0}
+          max={DIVISION_OPTIONS.length - 1}
+          step={1}
+          value={divisionIndex >= 0 ? divisionIndex : 3}
+          onChange={(v) => {
+            const idx = Math.round(v)
+            const division = DIVISION_OPTIONS[idx]
+            if (division) setArp({ division })
+          }}
+          disabled={!arp.enabled}
+          formatValue={(v) => DIVISION_OPTIONS[Math.round(v)] ?? '1/16'}
+        />
         <Knob
           label="Tempo"
           min={40}
@@ -148,26 +155,36 @@ export function ArpPanel() {
         />
         <Knob label="Gate" min={0.05} max={1} step={0.01} value={arp.gate} onChange={(v) => update({ arp: { ...arp, gate: v } })} disabled={!arp.enabled} />
         <Knob label="Swing" min={0} max={0.75} step={0.01} value={arp.swingPct ?? 0} onChange={(v) => update({ arp: { ...arp, swingPct: v } })} disabled={!arp.enabled || !(arp.bpmSync)} />
+        <Knob
+          label="Repeats"
+          min={1}
+          max={4}
+          step={1}
+          value={arp.repeats ?? 1}
+          onChange={(v) => setArp({ repeats: Math.round(v) })}
+          disabled={!arp.enabled}
+          formatValue={(v) => `${Math.round(v)}x`}
+        />
+        <Knob
+          label="Length"
+          min={0}
+          max={16}
+          step={1}
+          value={arp.patternLen ?? 0}
+          onChange={(v) => setArp({ patternLen: Math.round(v) })}
+          disabled={!arp.enabled}
+          formatValue={(v) => {
+            const val = Math.round(v)
+            return val === 0 ? 'Auto' : `${val}`
+          }}
+        />
       </div>
 
-      {/* Row 4: repeats + pattern length */}
-      <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <label>
-          <div className="label">Repeats</div>
-          <select value={arp.repeats ?? 1} onChange={(e) => update({ arp: { ...arp, repeats: Number(e.target.value) } })} disabled={!arp.enabled}>
-            {[1,2,3,4].map(n => <option key={n} value={n}>{n}x</option>)}
-          </select>
-        </label>
-        <label>
-          <div className="label">Length</div>
-          <select value={arp.patternLen ?? 0} onChange={(e) => update({ arp: { ...arp, patternLen: Number(e.target.value) } })} disabled={!arp.enabled}>
-            <option value={0}>Auto</option>
-            {Array.from({ length: 16 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
-      </div>
-
-      {/* Row 5: Step indicator */}
+      {chordSource === 'sequencer' && (
+        <div className="hint-text" style={{ fontSize: 12, opacity: 0.8 }}>
+          Sequencer pattern{sequencerChordCount > 0 ? ` • ${sequencerChordCount} interval${sequencerChordCount === 1 ? '' : 's'}` : ' • no active steps yet'}
+        </div>
+      )}
     </div>
   )
 }
