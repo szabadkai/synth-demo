@@ -1,6 +1,22 @@
 import type { ExpressionTarget } from './expressionTargets'
 import { phaseVocoderPitchShift } from './phaseVocoder'
 
+// Seeded random number generator (xorshift32) for deterministic spice randomization
+function seededRandom(seed: string): () => number {
+  let state = 0
+  for (let i = 0; i < seed.length; i++) {
+    state = (state << 5) - state + seed.charCodeAt(i)
+    state |= 0
+  }
+  if (state === 0) state = 1
+  return () => {
+    state ^= state << 13
+    state ^= state >>> 17
+    state ^= state << 5
+    return ((state >>> 0) / 0xffffffff)
+  }
+}
+
 export type WaveType = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'noise' | 'sample'
 
 export type ADSR = {
@@ -149,6 +165,8 @@ export type Patch = {
     grooveChord?: string
     progressionMode?: string
     grooveBaseMidi?: number
+    spiceAmount?: number // 0..1, blend between original and randomized
+    spiceSeed?: string // seed for deterministic randomization
   }
   expression?: {
     x: ExpressionTarget
@@ -252,6 +270,8 @@ export const defaultPatch: Patch = {
     steps: Array.from({ length: MAX_SEQUENCER_STEPS }, () => createEmptySequencerStep()),
     progressionMode: 'static',
     grooveBaseMidi: 60,
+    spiceAmount: 0,
+    spiceSeed: undefined,
   },
   expression: { x: 'osc1.detune', y: 'filter.cutoff' },
   modMatrix: [],
@@ -2535,17 +2555,46 @@ export class SynthEngine {
       127,
     )
 
+    // Apply spice modulation (Minifreak-style randomization)
+    const spiceAmount = clampValue(seq.spiceAmount ?? 0, 0, 1)
+    let finalOffset = step.offset || 0
+    let finalVelocity = step.velocity ?? 1
+    let finalGate = seq.gate ?? 0.6
+    let finalOn = step.on
+
+    if (spiceAmount > 0 && seq.spiceSeed) {
+      // Create seeded random generator for this step
+      const rng = seededRandom(`${seq.spiceSeed}-${i}`)
+
+      // Randomize offset (pitch) - can shift up to ±7 semitones
+      const randomOffset = Math.floor(rng() * 15) - 7
+      finalOffset = Math.round(finalOffset * (1 - spiceAmount) + randomOffset * spiceAmount)
+
+      // Randomize velocity - vary by ±40%
+      const randomVelocity = 0.6 + (rng() * 0.8)
+      finalVelocity = clampValue(finalVelocity * (1 - spiceAmount) + randomVelocity * spiceAmount, 0, 1)
+
+      // Randomize gate - vary between 0.2 and 1.0
+      const randomGate = 0.2 + rng() * 0.8
+      finalGate = clampValue(finalGate * (1 - spiceAmount) + randomGate * spiceAmount, 0.05, 1)
+
+      // Occasionally mute steps at high spice amounts
+      if (spiceAmount > 0.7 && rng() < 0.2 * spiceAmount) {
+        finalOn = false
+      }
+    }
+
     // Stop previous sustained note if gate >= 1
-    if (this.seqLastNote != null && (seq.gate ?? 0.6) >= 1) {
+    if (this.seqLastNote != null && finalGate >= 1) {
       const toOffPrev = this.seqLastNote
       this.arpBypass = true
       try { this.noteOff(toOffPrev) } finally { this.arpBypass = false }
       this.seqLastNote = null
     }
 
-    if (step.on) {
-      const midi = Math.round(rootMidi + (step.offset || 0))
-      const velocity = clampValue(step.velocity ?? 1, 0, 1)
+    if (finalOn) {
+      const midi = Math.round(rootMidi + finalOffset)
+      const velocity = clampValue(finalVelocity, 0, 1)
       // Trigger note bypassing ARP
       this.arpBypass = true
       try { this.noteOn(midi, velocity) } finally { this.arpBypass = false }
@@ -2554,7 +2603,7 @@ export class SynthEngine {
       const token = ++this.seqControlToken
       this.updateControlSource('seqStep', velocity * 2 - 1)
 
-      const gate = Math.max(0.05, Math.min(1, seq.gate ?? 0.6))
+      const gate = Math.max(0.05, Math.min(1, finalGate))
       const offMs = (this.seqCurrentStepMs || this.getSeqStepMs()) * gate
       setTimeout(() => {
         this.arpBypass = true

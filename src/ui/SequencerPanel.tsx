@@ -240,6 +240,40 @@ export function SequencerPanel() {
             return PROGRESSION_PRESETS[clampedIdx].label
           }}
         />
+        <Knob
+          label="Spice"
+          min={0}
+          max={1}
+          step={0.01}
+          value={seq.spiceAmount ?? 0}
+          onChange={(v) => {
+            const spiceSeed = seq.spiceSeed || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+            set({ spiceAmount: v, spiceSeed })
+          }}
+          disabled={!seq.enabled}
+          formatValue={(v) => `${Math.round(v * 100)}%`}
+        />
+        <button
+          className="dice-button"
+          onClick={() => {
+            const newSeed = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+            set({ spiceSeed: newSeed })
+          }}
+          disabled={!seq.enabled || (seq.spiceAmount ?? 0) === 0}
+          title="Roll the dice - generate new random variation"
+          style={{
+            padding: '8px 12px',
+            borderRadius: 6,
+            border: '1px solid #2a3040',
+            background: '#1d2432',
+            color: 'var(--text)',
+            cursor: 'pointer',
+            fontSize: 14,
+            fontWeight: 500,
+          }}
+        >
+          🎲 Dice
+        </button>
       </div>
       <div className="sequence-body">
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
