@@ -177,15 +177,15 @@ export function App() {
           <p>Delay and reverb live here so you can finish a patch without leaving the synth view.</p>
           <h5>Delay</h5>
           <ul>
-            <li><strong>Enabled</strong>: toggle the bucket-brigade style delay.</li>
+            <li><strong>On</strong>: toggle the bucket-brigade style delay.</li>
             <li><strong>Time</strong>: set delay time in seconds (0–1.5s). Syncs nicely with tempo divisions.</li>
             <li><strong>Feedback</strong>: control repeats; keep under ~0.7 for stable feedback.</li>
             <li><strong>Mix</strong>: blend the wet signal back with the dry synth.</li>
           </ul>
           <h5>Reverb</h5>
           <ul>
-            <li><strong>Enabled</strong>: load the convolution reverb stage.</li>
-            <li><strong>Size</strong>: pick the impulse “room” length.</li>
+            <li><strong>On</strong>: load the convolution reverb stage.</li>
+            <li><strong>Size</strong>: pick the impulse "room" length.</li>
             <li><strong>Decay</strong>: shape how long the tail sustains.</li>
             <li><strong>Mix</strong>: balance ambience without washing out the dry signal.</li>
           </ul>
@@ -243,27 +243,39 @@ export function App() {
       title: 'Arpeggiator',
       body: (
         <div className="module-help">
-          <p>Turn held chords into rhythmic runs that follow the global transport.</p>
+          <p>Turn held chords into rhythmic runs that follow the global transport. Features 6 playback modes including the new Sequence mode.</p>
           <h5>Playback</h5>
           <ul>
-            <li><strong>Enabled</strong>: start capturing held notes.</li>
+            <li><strong>On</strong>: enable and start capturing held notes.</li>
             <li><strong>Latch</strong>: keep notes running after you release the keys.</li>
             <li><strong>Clear</strong>: flush the current latched chord without toggling the arp off.</li>
           </ul>
-          <h5>Timing</h5>
+          <h5>Playback Modes</h5>
           <ul>
-            <li><strong>Mode</strong>: set traversal (up, down, up/down, random, as played).</li>
-            <li><strong>Octaves</strong>: extend the pattern across 1–4 octaves.</li>
-            <li><strong>Chord</strong>: fold power chords, triads, or sevenths into each step.</li>
-            <li><strong>Division</strong>: choose rhythmic value (1/4–1/16T).</li>
-            <li><strong>BPM</strong>: the slider writes to the global tempo so drums and sequencer stay in sync.</li>
-            <li><strong>Gate/Swing</strong>: tighten note length and groove feel.</li>
-            <li><strong>Repeats/Length</strong>: loop steps multiple times or clamp the pattern length.</li>
+            <li><strong>Up</strong>: arpeggiate held notes ascending by pitch.</li>
+            <li><strong>Down</strong>: arpeggiate held notes descending by pitch.</li>
+            <li><strong>Up-Down</strong>: ascend then descend in ping-pong fashion.</li>
+            <li><strong>Random</strong>: randomize note order on each cycle.</li>
+            <li><strong>As Played</strong>: preserve the exact order you pressed keys—great for creating specific melodic patterns that aren't just up or down.</li>
+            <li><strong>Sequence</strong> ⭐ <em>NEW</em>: play through your Sequencer pattern with rhythmic rests. ON steps in the sequencer trigger notes using your held note(s) + the step's offset; OFF steps create pauses/rests. Perfect for creating complex rhythmic sequences that combine the arp's timing with the sequencer's melody.</li>
           </ul>
-          <h5>Tips</h5>
+          <h5>Timing & Shape</h5>
           <ul>
-            <li>Combine Latch with the Sequencer for counterpoint—that way the arp handles chords while the sequencer drives lead lines.</li>
-            <li>Use the expression surface to modulate filter cutoff while the arp runs for dynamic sweeps.</li>
+            <li><strong>Octaves</strong>: extend the pattern across 1–4 octaves.</li>
+            <li><strong>Chord</strong>: add intervals to each note—Single (none), Power (5th), Major/Minor triads, Sus2/Sus4, Maj7/Min7, or <strong>Seq</strong> to use the sequencer's active step offsets as chord intervals (different from Sequence mode).</li>
+            <li><strong>Division</strong>: choose rhythmic value (1/4, 1/8, 1/8T, 1/16, 1/16T).</li>
+            <li><strong>Tempo</strong>: linked to the global BPM so drums and sequencer stay in sync.</li>
+            <li><strong>Gate</strong>: control note length (0.05–1.0).</li>
+            <li><strong>Swing</strong>: add shuffle/groove (disabled for triplets and 1/4 notes).</li>
+            <li><strong>Repeats</strong>: repeat each step 1–4 times before advancing.</li>
+            <li><strong>Length</strong>: limit the pattern length (0 = auto, uses full pool).</li>
+          </ul>
+          <h5>Creative Tips</h5>
+          <ul>
+            <li>Try <strong>Sequence mode</strong> with a rhythmic pattern in the sequencer for instant complex melodies.</li>
+            <li>Use <strong>As Played mode</strong> to create melodic patterns by pressing keys in a specific order.</li>
+            <li>Combine Latch with the Sequencer for counterpoint—the arp handles chords while the sequencer drives lead lines.</li>
+            <li>Map the expression surface (CapsLock + trackpad) to filter cutoff for dynamic sweeps during arps.</li>
           </ul>
         </div>
       ),

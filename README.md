@@ -10,7 +10,8 @@ WebSynth Studio is a browser-based analogue-style synthesizer built with React, 
 
 - **Dual ENG voice engine** (ENG1/ENG2) with sub, ring-mod, macro engines, and a flexible mixer.
 - **Filter, envelopes, and effects** including delay and convolution reverb.
-- **Modulation system** with two assignable LFOs, arpeggiator, step sequencer, and macro controls.
+- **Modulation system** with two assignable LFOs, 6-mode arpeggiator (including new Sequence mode), step sequencer, and macro controls.
+- **Advanced arpeggiator** with Up/Down/Random/As-Played modes, plus new Sequence mode that plays through your sequencer pattern with rests.
 - **Curated presets** surfaced in the top bar that cover pads, basses, macro textures, and motion studies.
 - **Configurable XY expression**: engage CapsLock and glide on the trackpad to control any two parameters (filter cutoff, oscillator detune, FM amount, envelope times, macro sliders, LFO rate/depth, etc.).
 - **Patch workflow**: import/export JSON patches, curate presets under `src/patches/`, and persist the working sound via local storage.
@@ -33,6 +34,22 @@ Open the printed Vite URL (defaults to http://localhost:5173). Click the **Power
 3. The live HUD shows which parameters are being modulated and their current percentage.
 4. Customize X and Y destinations in the **Expression** panel.
 5. Disengaging CapsLock smoothly restores each parameter to its stored patch value.
+
+### Arpeggiator Modes
+
+The arpeggiator features 6 playback modes accessible via the Mode knob:
+
+- **Up** - Arpeggiate held notes ascending by pitch
+- **Down** - Arpeggiate held notes descending by pitch
+- **Up-Down** - Ascend then descend in ping-pong fashion
+- **Random** - Randomize note order on each cycle
+- **As Played** - Preserve the exact order you pressed keys (great for creating melodic patterns)
+- **Sequence** ⭐ NEW - Play through your Sequencer pattern with rhythmic rests
+  - ON steps trigger notes using your held note(s) + the step's offset
+  - OFF steps create pauses/rests in the pattern
+  - Combine with octaves and chord modes for complex rhythmic sequences
+
+**Chord Options:** Use the Chord knob to add intervals (Power, Major, Minor, Sus2/4, Maj7/Min7) or select "Seq" to use your sequencer offsets as chord intervals.
 
 ## Available Scripts
 

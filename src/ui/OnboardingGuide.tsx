@@ -28,8 +28,9 @@ const guideSections: Array<{
     title: 'Modulation Playground',
     points: [
       'Assign LFOs to pitch, filter, or effect targets for evolving textures – adjust rate, shape, sync, and depth.',
-      'Flip on the Arpeggiator to latch held notes, experiment with patterns, octave ranges, and tempo sync.',
-      'Program riffs in the Sequencer, toggle steps live, and shape groove with direction and swing.',
+      'Flip on the Arpeggiator to latch held notes, experiment with 6 modes (Up, Down, Up-Down, Random, As Played, Sequence).',
+      'Try "Sequence" mode to play through your Sequencer pattern with rests – OFF steps create rhythmic pauses.',
+      'Program riffs in the Sequencer, toggle steps live, and shape groove with progression modes and spice amount.',
     ],
   },
   {
@@ -62,6 +63,15 @@ const guideSections: Array<{
       'Toggle Enable MIDI input in Settings → MIDI to request browser permission for your controller.',
       'Select a detected device and play – incoming notes route straight into the synth voice engine.',
       'Status hints show permission prompts, errors, or a friendly ready state so you know what to expect.',
+    ],
+  },
+  {
+    title: 'Arpeggiator Deep Dive',
+    points: [
+      '"Up/Down/Up-Down" modes arpeggiate sorted by pitch; "Random" shuffles on each cycle.',
+      '"As Played" preserves the order you pressed keys – great for creating specific melodic patterns.',
+      '"Sequence" mode plays through your Sequencer pattern: ON steps trigger notes, OFF steps are rests.',
+      'Use "Chord" knob to add intervals (Single, Power, Major, Minor, etc.) or "Seq" to use sequencer offsets as chords.',
     ],
   },
   {

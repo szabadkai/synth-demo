@@ -132,6 +132,31 @@ Each model uses three macro parameters (harmonics, timbre, morph) that control d
 - On CapsLock release, parameters fade back to stored patch values
 - Configured in ExpressionPanel, implemented in ExpressionSurface
 
+### Arpeggiator System
+The arpeggiator provides 6 playback modes with chord and pattern options:
+
+**Modes:**
+- `up` - Arpeggiate held notes ascending by pitch
+- `down` - Arpeggiate held notes descending by pitch
+- `updown` - Ascend then descend (ping-pong style)
+- `random` - Randomize note order on each cycle
+- `asplayed` - Preserve the order keys were pressed (not sorted by pitch)
+- `sequence` - **NEW**: Play through the Sequencer pattern with rests
+  - ON steps in the sequencer trigger notes (held note + offset)
+  - OFF steps create rhythmic pauses/rests
+  - Respects sequencer length and step offsets
+  - Combines arp octaves with sequencer pattern
+
+**Chord Modes:**
+- `Single` - Just the held notes
+- `Power/Major/Minor/Sus2/Sus4/Maj7/Min7` - Add chord intervals to each note
+- `Seq` - Use sequencer's active step offsets as chord intervals (different from Sequence mode)
+
+**UI Updates:**
+- All arp controls now use knobs instead of dropdowns for tactile control
+- All enable toggles use "On" label instead of "Enabled" for consistency
+- Knobs auto-format values (e.g., "1x", "2x" for repeats, "Auto" for length 0)
+
 ### Preset Management
 - Factory presets defined in `src/patches/presets.ts`
 - Export format: JSON with full patch state
