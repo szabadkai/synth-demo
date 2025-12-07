@@ -25,6 +25,7 @@ import { BuyCoffeeButton } from './BuyCoffeeButton'
 import { OscilloscopeSettings } from './OscilloscopeSettings'
 import { PresetSelector } from './PresetSelector'
 import { ModMatrixPanel } from './ModMatrixPanel'
+import { RecorderPanel } from './RecorderPanel'
 
 const GUIDE_STORAGE_KEY = 'websynth-guide-seen'
 const HELP_PANEL_IDS = ['oscilloscope', 'oscillator', 'effects', 'lfos', 'arp', 'sequencer', 'modmatrix', 'drum', 'keyboard'] as const
@@ -84,15 +85,17 @@ export function App() {
   }
 
   const panels: DashboardPanelConfig[] = [
-    { id: 'oscilloscope', title: 'Oscilloscope', span: 2, render: () => (
-      <div className="oscilloscope-stack">
-        <Oscilloscope />
-        <div className="oscilloscope-row">
-          <FilterPanel />
-          <EnvelopePanel />
+    {
+      id: 'oscilloscope', title: 'Oscilloscope', span: 2, render: () => (
+        <div className="oscilloscope-stack">
+          <Oscilloscope />
+          <div className="oscilloscope-row">
+            <FilterPanel />
+            <EnvelopePanel />
+          </div>
         </div>
-      </div>
-    ) },
+      )
+    },
     { id: 'oscillator', title: 'Oscillator', span: 2, render: () => <OscillatorPanel /> },
     { id: 'effects', title: 'Effects', span: 2, render: () => <EffectsPanel /> },
     { id: 'lfos', title: 'LFOs', span: 2, render: () => <LFOPanel /> },
@@ -378,6 +381,7 @@ export function App() {
         <h2>WebSynth Studio</h2>
         <div className="row">
           <PresetSelector />
+          <RecorderPanel />
           <button onClick={initNow}>{engine ? 'Audio Ready' : 'Power On'}</button>
           <button
             onClick={() => {

@@ -599,6 +599,13 @@ export class SynthEngine {
     }
   }
 
+  // Record destination
+  private recordDestination: MediaStreamAudioDestinationNode
+
+  public getRecordDestination() {
+    return this.recordDestination
+  }
+
   private getLfoConfig(source: 'lfo1' | 'lfo2'): NonNullable<Patch['lfo1']> {
     return source === 'lfo2'
       ? (this.patch.lfo2 ?? defaultPatch.lfo2!)
@@ -803,8 +810,13 @@ export class SynthEngine {
   }
 
   constructor(ctx?: AudioContext) {
-    this.ctx = ctx ?? new (window.AudioContext || (window as any).webkitAudioContext)()
+    this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
     this.master = this.ctx.createGain()
+    // Initialize recording destination
+    this.recordDestination = this.ctx.createMediaStreamDestination()
+    this.master.connect(this.ctx.destination)
+    this.master.connect(this.recordDestination)
+    
     this.filter = this.ctx.createBiquadFilter()
     this.analyser = this.ctx.createAnalyser()
 
