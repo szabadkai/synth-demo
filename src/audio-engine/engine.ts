@@ -1,281 +1,73 @@
-import type { ExpressionTarget } from './expressionTargets'
+import {
+  ADSR,
+  defaultPatch,
+  EngineMode,
+  ExpressionTarget,
+  ExpressionAxis, // Added
+  EXPRESSION_AXES, // Added
+  LfoWave,
+  MacroModel,
+  MacroSettings,
+  ModMatrixRow,
+  ModSource,
+  ModTarget,
+  normalizeOscillatorConfig,
+  OscillatorConfig,
+  Patch,
+  SamplerSettings,
+  SequencerStep,
+  WaveType,
+  MAX_SEQUENCER_STEPS,
+  SEQUENCER_PROGRESSIONS,
+  createEmptySequencerStep,
+  DEFAULT_OSCILLATOR_MACRO,
+  DEFAULT_OSCILLATOR_SAMPLER,
+} from './types'
+import {
+  clampValue,
+  createNoiseBuffer,
+  ensureFinite,
+  ensureManagedSource,
+  isAudioSource,
+  isAudioTarget,
+  isControlSource,
+  ManagedSourceNode,
+  markSourceAutoStarted,
+  markSourceStarted,
+  seededRandom
+} from './utils'
+import { SamplerContext, Voice } from './Voice'
 import { phaseVocoderPitchShift } from './phaseVocoder'
 
-// Seeded random number generator (xorshift32) for deterministic spice randomization
-function seededRandom(seed: string): () => number {
-  let state = 0
-  for (let i = 0; i < seed.length; i++) {
-    state = (state << 5) - state + seed.charCodeAt(i)
-    state |= 0
-  }
-  if (state === 0) state = 1
-  return () => {
-    state ^= state << 13
-    state ^= state >>> 17
-    state ^= state << 5
-    return ((state >>> 0) / 0xffffffff)
-  }
-}
+// Re-export types associated with the engine
+export type {
+  Patch,
+  ModSource,
+  ModTarget,
+  ModMatrixRow,
+  SequencerStep,
+  ADSR,
+  WaveType,
+  LfoWave,
+  MacroModel,
+  SamplerSettings,
+  OscillatorConfig,
+  EngineMode,
+  OscillatorMode,
+} from './types'
 
-export type WaveType = 'sine' | 'square' | 'sawtooth' | 'triangle' | 'noise' | 'sample'
+// Re-export values used by UI
+export {
+  defaultPatch,
+  MAX_SEQUENCER_STEPS,
+  SEQUENCER_PROGRESSIONS,
+  createEmptySequencerStep,
+  DEFAULT_OSCILLATOR_MACRO,
+  DEFAULT_OSCILLATOR_SAMPLER,
+  normalizeOscillatorConfig,
+} from './types'
 
-export type ADSR = {
-  attack: number
-  decay: number
-  sustain: number
-  release: number
-}
-
-export type MacroModel =
-  | 'va'
-  | 'fold'
-  | 'pluck'
-  | 'supersaw'
-  | 'pwm'
-  | 'fm2op'
-  | 'wavetable'
-  | 'harmonic'
-  | 'chord'
-  | 'dirichlet'
-  | 'formant'
-
-export type LfoWave = Exclude<WaveType, 'sample'>
-
-export type SamplerSettings = {
-  id: string | null
-  name: string
-  dataUrl: string | null
-  rootMidi: number
-  loop: boolean
-  recordedAt?: number
-  durationSec?: number
-  trimStartSec?: number
-  trimEndSec?: number
-}
-
-export type MacroSettings = {
-  model: MacroModel
-  harmonics: number
-  timbre: number
-  morph: number
-  level: number
-}
-
-export type OscillatorMode = 'analog' | 'macro' | 'sampler'
-
-export type EngineMode = 'classic' | 'macro' | 'sampler'
-
-export type OscillatorConfig = {
-  wave: WaveType
-  detune: number
-  detuneFine?: number
-  octave?: number
-  mode?: OscillatorMode
-  macro?: MacroSettings
-  sampler?: SamplerSettings
-}
-
-export type ModSource = 'lfo1' | 'lfo2' | 'exprX' | 'exprY' | 'seqStep' | 'velocity' | 'gate'
-
-export type ModTarget =
-  | 'filter.cutoff'
-  | 'filter.q'
-  | 'master.gain'
-  | 'macro.harmonics'
-  | 'macro.timbre'
-  | 'macro.morph'
-  | 'macro.level'
-  | 'fm.amount'
-  | 'mix'
-  | 'envelope.attack'
-  | 'envelope.release'
-
-export type ModMatrixRow = {
-  id: string
-  source: ModSource
-  target: ModTarget
-  amount: number
-  enabled: boolean
-}
-
-export type SequencerStep = {
-  on: boolean
-  offset: number
-  velocity: number
-}
-
-export type Patch = {
-  osc1: OscillatorConfig
-  osc2: OscillatorConfig
-  mix: number // 0 = osc1 only, 1 = osc2 only
-  fm: { enabled: boolean; ratio: number; amount: number } // amount in Hz added to carrier freq
-  sub: { enabled: boolean; octave: 1 | 2; level: number; wave?: Exclude<WaveType, 'noise' | 'sample'> }
-  ring: { enabled: boolean; amount: number } // amount 0..1 crossfade between normal and ring product
-  filter: { type: BiquadFilterType; cutoff: number; q: number }
-  envelope: ADSR
-  master: { gain: number }
-  sampler: SamplerSettings
-  // Macro (Plaits-like) engine
-  engineMode?: EngineMode
-  macro?: {
-    model: MacroModel
-    harmonics: number // 0..1
-    timbre: number // 0..1
-    morph: number // 0..1
-    level: number // 0..1
-  }
-  effects?: {
-    delay: { enabled: boolean; time: number; feedback: number; mix: number }
-    reverb: { enabled: boolean; size: number; decay: number; mix: number }
-  }
-  lfo1?: { enabled: boolean; wave: LfoWave; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
-  lfo2?: { enabled: boolean; wave: LfoWave; rateHz: number; amount: number; dest: 'pitch' | 'filter' | 'amp' }
-  arp?: {
-    enabled: boolean
-    // Free-rate mode
-    rateHz: number
-    // Tempo-sync
-    bpmSync: boolean
-    bpm: number
-    division: '1/4' | '1/8' | '1/8T' | '1/16' | '1/16T'
-    // Playback
-    gate: number
-    chordSource?: 'preset' | 'sequencer'
-    mode: 'up' | 'down' | 'updown' | 'random' | 'asplayed' | 'sequence'
-    octaves: number
-    chord?: 'none' | 'power' | 'major' | 'minor' | 'sus2' | 'sus4' | 'maj7' | 'min7'
-    latch: boolean
-    swingPct?: number // 0..1, 0 = straight, 1 = extreme swing
-    repeats?: number // 1..4
-    patternLen?: number // 0 = auto (pool length), else limit steps
-  }
-  sequencer?: {
-    enabled: boolean
-    playing: boolean
-    bpm: number
-    division: '1/4' | '1/8' | '1/8T' | '1/16' | '1/16T'
-    swingPct?: number
-    gate: number
-    rootMidi: number
-    length: number
-    steps: SequencerStep[]
-    autoGroove?: boolean
-    autoGrooveRepeat?: number
-    grooveStyle?: string
-    grooveChord?: string
-    progressionMode?: string
-    grooveBaseMidi?: number
-    spiceAmount?: number // 0..1, blend between original and randomized
-    spiceSeed?: string // seed for deterministic randomization
-  }
-  expression?: {
-    x: ExpressionTarget
-    y: ExpressionTarget
-  }
-  modMatrix?: ModMatrixRow[]
-}
-
-export const MAX_SEQUENCER_STEPS = 64
-export const createEmptySequencerStep = (): SequencerStep => ({ on: false, offset: 0, velocity: 1 })
-
-export type SequencerProgression = {
-  id: string
-  label: string
-  offsets: number[]
-}
-
-export const SEQUENCER_PROGRESSIONS: SequencerProgression[] = [
-  { id: 'static', label: 'Static', offsets: [0] },
-  { id: 'i-iv-v', label: 'I - IV - V', offsets: [0, 5, 7] },
-  { id: 'i-v-vi-iv', label: 'I - V - vi - IV', offsets: [0, 7, 9, 5] },
-  { id: 'ii-v-i', label: 'ii - V - I', offsets: [2, 7, 0] },
-  { id: 'vi-iv-i-v', label: 'vi - IV - I - V', offsets: [9, 5, 0, 7] },
-  { id: 'blues', label: 'Blues I - IV - V', offsets: [0, 5, 7, 0] },
-  { id: 'modal-dorian', label: 'Modal Dorian', offsets: [0, 2, 3, 5] },
-  { id: 'chromatic-rise', label: 'Chromatic Rise', offsets: [0, 1, 2, 3, 4, 5] },
-]
-
-export const DEFAULT_OSCILLATOR_MACRO: MacroSettings = {
-  model: 'va',
-  harmonics: 0.6,
-  timbre: 0.5,
-  morph: 0.5,
-  level: 1.0,
-}
-
-export const DEFAULT_OSCILLATOR_SAMPLER: SamplerSettings = {
-  id: null,
-  name: 'Empty',
-  dataUrl: null,
-  rootMidi: 60,
-  loop: true,
-  recordedAt: undefined,
-  durationSec: 0,
-  trimStartSec: 0,
-  trimEndSec: 0,
-}
-
-const normalizeOscillatorConfig = (osc: OscillatorConfig): OscillatorConfig => ({
-  ...osc,
-  mode: osc.mode ?? 'analog',
-  macro: { ...DEFAULT_OSCILLATOR_MACRO, ...(osc.macro ?? {}) },
-  sampler: { ...DEFAULT_OSCILLATOR_SAMPLER, ...(osc.sampler ?? {}) },
-})
-
-export const defaultPatch: Patch = {
-  osc1: {
-    wave: 'sawtooth',
-    detune: 0,
-    detuneFine: 0,
-    octave: 0,
-    mode: 'analog',
-    macro: { ...DEFAULT_OSCILLATOR_MACRO },
-    sampler: { ...DEFAULT_OSCILLATOR_SAMPLER },
-  },
-  osc2: {
-    wave: 'square',
-    detune: 0,
-    detuneFine: 0,
-    octave: 0,
-    mode: 'analog',
-    macro: { ...DEFAULT_OSCILLATOR_MACRO },
-    sampler: { ...DEFAULT_OSCILLATOR_SAMPLER },
-  },
-  mix: 0.0,
-  fm: { enabled: false, ratio: 2.0, amount: 0 },
-  sub: { enabled: false, octave: 1, level: 0.0, wave: 'square' },
-  ring: { enabled: false, amount: 1.0 },
-  filter: { type: 'lowpass', cutoff: 1200, q: 0.8 },
-  envelope: { attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3 },
-  master: { gain: 0.2 },
-  sampler: { ...DEFAULT_OSCILLATOR_SAMPLER },
-  engineMode: 'classic',
-  macro: { ...DEFAULT_OSCILLATOR_MACRO },
-  effects: {
-    delay: { enabled: false, time: 0.25, feedback: 0.3, mix: 0.2 },
-    reverb: { enabled: false, size: 0.5, decay: 0.5, mix: 0.25 },
-  },
-  lfo1: { enabled: false, wave: 'sine', rateHz: 5, amount: 0.2, dest: 'pitch' },
-  lfo2: { enabled: false, wave: 'triangle', rateHz: 0.5, amount: 0.4, dest: 'filter' },
-  arp: { enabled: false, rateHz: 8, bpmSync: false, bpm: 120, division: '1/8', gate: 0.6, chordSource: 'preset', mode: 'up', octaves: 1, chord: 'none', latch: false, swingPct: 0, repeats: 1, patternLen: 0 },
-  sequencer: {
-    enabled: false,
-    playing: false,
-    bpm: 120,
-    division: '1/16',
-    swingPct: 0,
-    gate: 0.6,
-    rootMidi: 60,
-    length: 16,
-    steps: Array.from({ length: MAX_SEQUENCER_STEPS }, () => createEmptySequencerStep()),
-    progressionMode: 'static',
-    grooveBaseMidi: 60,
-    spiceAmount: 0,
-    spiceSeed: undefined,
-  },
-  expression: { x: 'osc1.detune', y: 'filter.cutoff' },
-  modMatrix: [],
-}
+type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T
 
 type ExpressionTargetDefinition = {
   getBase: (engine: SynthEngine) => number
@@ -283,58 +75,7 @@ type ExpressionTargetDefinition = {
   apply: (engine: SynthEngine, value: number) => void
 }
 
-const ensureFinite = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback)
-
-type ManagedSourceNode = AudioScheduledSourceNode & {
-  _autoStarted?: boolean
-  _started?: boolean
-  _managedLifecycleAttached?: boolean
-}
-
-const ensureManagedSource = <T extends AudioScheduledSourceNode>(source: T): T & ManagedSourceNode => {
-  const managed = source as T & ManagedSourceNode
-  if (!managed._managedLifecycleAttached) {
-    managed._managedLifecycleAttached = true
-    const handleEnded = () => {
-      managed._started = false
-    }
-    if (typeof managed.addEventListener === 'function') {
-      managed.addEventListener('ended', handleEnded as EventListener)
-    } else {
-      const previous = (managed as any).onended
-      ;(managed as any).onended = (event: Event) => {
-        handleEnded()
-        if (typeof previous === 'function') previous.call(managed, event)
-      }
-    }
-  }
-  if (managed._started == null) managed._started = !!managed._autoStarted
-  return managed
-}
-
-const markSourceStarted = (source: AudioScheduledSourceNode) => {
-  const managed = ensureManagedSource(source)
-  managed._started = true
-}
-
-const markSourceAutoStarted = (source: AudioScheduledSourceNode) => {
-  const managed = ensureManagedSource(source)
-  managed._autoStarted = true
-  managed._started = true
-}
-
-const isAudioSource = (source: ModSource) => source === 'lfo1' || source === 'lfo2'
-
-const isAudioTarget = (target: ModTarget) =>
-  target === 'filter.cutoff' ||
-  target === 'filter.q' ||
-  target === 'master.gain' ||
-  target === 'mix'
-
-const isControlSource = (source: ModSource) => source === 'exprX' || source === 'exprY' || source === 'seqStep' || source === 'velocity' || source === 'gate'
-
 const getLfoPatch = (engine: SynthEngine, which: 'lfo1' | 'lfo2') => engine.patch[which] ?? defaultPatch[which]!
-
 const getMacroPatch = (engine: SynthEngine) => engine.patch.macro ?? defaultPatch.macro!
 
 const EXPRESSION_RUNTIME_TARGETS: Record<ExpressionTarget, ExpressionTargetDefinition> = {
@@ -479,38 +220,7 @@ const CONTROL_TARGET_DEFINITIONS: Partial<Record<ModTarget, ExpressionTargetDefi
   'envelope.release': EXPRESSION_RUNTIME_TARGETS['envelope.release'],
 }
 
-type ExpressionAxis = 'x' | 'y'
 
-type DeepPartial<T> = T extends Function
-  ? T
-  : T extends Array<infer U>
-    ? Array<DeepPartial<U>>
-    : T extends object
-      ? { [K in keyof T]?: DeepPartial<T[K]> }
-      : T
-
-const EXPRESSION_AXES: ExpressionAxis[] = ['x', 'y']
-
-const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-
-function createNoiseBuffer(ctx: AudioContext) {
-  const bufferSize = ctx.sampleRate * 1
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
-  const data = buffer.getChannelData(0)
-  for (let i = 0; i < bufferSize; i++) {
-    data[i] = Math.random() * 2 - 1
-  }
-  return buffer
-}
-
-type ActiveVoice = {
-  stop: (t: number) => void
-  osc1Detune?: AudioParam
-  osc2Detune?: AudioParam
-  mixControl?: ConstantSourceNode
-  mixBias?: ConstantSourceNode
-  mixConnections: Array<{ sourceIndex: number; gain: GainNode }>
-}
 
 export class SynthEngine {
   private ctx: AudioContext
@@ -518,7 +228,7 @@ export class SynthEngine {
   private filter: BiquadFilterNode
   private analyser: AnalyserNode
   private noiseBuffer?: AudioBuffer
-  private activeVoices = new Map<number, ActiveVoice>()
+  private activeVoices = new Map<number, Voice>()
   private fxInput: GainNode
   private fxOutput: GainNode
   private currentFxTap: AudioNode | null = null
@@ -999,79 +709,7 @@ export class SynthEngine {
     node.wave = wave
   }
 
-  private getPitchedSamplerBuffer(pitchRatio: number) {
-    if (!this.samplerBuffer) return null
-    const sampleRate = this.samplerBuffer.sampleRate
-    const startSec = this.samplerMeta.trimStartSec ?? 0
-    const endSec = this.samplerMeta.trimEndSec ?? this.samplerBuffer.duration
-    const clampedStart = clampValue(startSec, 0, this.samplerBuffer.duration)
-    const clampedEnd = clampValue(endSec, clampedStart + 0.005, this.samplerBuffer.duration)
-    const startSample = Math.max(0, Math.floor(clampedStart * sampleRate))
-    const endSample = Math.max(startSample + 1, Math.min(this.samplerBuffer.length, Math.floor(clampedEnd * sampleRate)))
-    const frameLength = endSample - startSample
-    if (frameLength <= 0) return null
-    const id = this.samplerMeta.id ?? 'inline'
-    const sourceKey = `${id}|${this.samplerMeta.dataUrl ?? 'data'}|${startSample}|${endSample}`
-    const ratio = Number.isFinite(pitchRatio) && pitchRatio > 0 ? pitchRatio : 1
-    const ratioKey = ratio.toFixed(6)
-    const cacheKey = `${sourceKey}|${ratioKey}|${sampleRate}|${this.samplerBuffer.numberOfChannels}`
-    const cached = this.samplerPitchCache.get(cacheKey)
-    if (cached) return cached
 
-    const channelCount = this.samplerBuffer.numberOfChannels
-    const channels: Float32Array[] = []
-    for (let ch = 0; ch < channelCount; ch++) {
-      const source = this.samplerBuffer.getChannelData(ch)
-      const segment = source.subarray(startSample, endSample)
-      channels.push(new Float32Array(segment))
-    }
-
-    const shifted = Math.abs(ratio - 1) < 1e-4 ? channels : phaseVocoderPitchShift({ channels, pitchRatio: ratio })
-
-    if (!shifted.length || shifted[0].length === 0) return null
-
-    const buffer = this.ctx.createBuffer(shifted.length, shifted[0].length, sampleRate)
-    for (let ch = 0; ch < shifted.length; ch++) {
-      buffer.copyToChannel(shifted[ch], ch, 0)
-    }
-    this.samplerPitchCache.set(cacheKey, buffer)
-    return buffer
-  }
-
-  private createSamplerSource(
-    freq: number,
-    which: 'osc1' | 'osc2',
-    options: { autoStart?: boolean; allowLoop?: boolean } = {},
-  ): AudioBufferSourceNode | null {
-    const { autoStart = true, allowLoop = true } = options
-    if (!this.samplerBuffer) return null
-    this.samplerMeta = this.normalizeSamplerMeta(this.samplerMeta, this.samplerBuffer)
-    const baseFreq = this.getSamplerBaseFrequency()
-    const detuneCents = this.getDetuneCents(which)
-    const detuneRatio = Math.pow(2, detuneCents / 1200)
-    const ratio = baseFreq > 0 ? (freq / baseFreq) * detuneRatio : detuneRatio
-    const pitchedBuffer = this.getPitchedSamplerBuffer(ratio)
-    if (!pitchedBuffer) return null
-    const playbackWindow = pitchedBuffer.duration
-    const loopEnabled = allowLoop && !!this.samplerMeta.loop && playbackWindow > 0.01
-    const src = ensureManagedSource(this.ctx.createBufferSource())
-    src.buffer = pitchedBuffer
-    src.loop = loopEnabled
-    if (loopEnabled) {
-      src.loopStart = 0
-      src.loopEnd = playbackWindow
-    }
-    if (autoStart) {
-      if (loopEnabled) {
-        src.start(0)
-      } else {
-        const duration = Math.max(0.005, playbackWindow)
-        src.start(0, 0, duration)
-      }
-      markSourceAutoStarted(src)
-    }
-    return src
-  }
 
   applyPatch(p: DeepPartial<Patch> = {}, options: { fromExpression?: boolean } = {}) {
     const { fromExpression = false } = options
@@ -1233,37 +871,31 @@ export class SynthEngine {
     if (!sampler?.dataUrl) return
     await this.updateSamplerBuffer(sampler)
     if (!this.samplerBuffer) return
-    const midi = Number.isFinite(sampler.rootMidi) ? sampler.rootMidi! : 60
-    const freq = 440 * Math.pow(2, (midi - 69) / 12)
-    const created = this.createSamplerSource(freq, target, { autoStart: false, allowLoop: false })
-    if (!created) return
-    const source = ensureManagedSource(created)
+
+    const start = this.samplerMeta.trimStartSec ?? 0
+    const end = this.samplerMeta.trimEndSec ?? this.samplerBuffer.duration
+    const duration = Math.max(0.05, end - start)
+
+    const source = ensureManagedSource(this.ctx.createBufferSource())
+    source.buffer = this.samplerBuffer
+    
+    // Connect to master directly (raw preview)
     const gain = this.ctx.createGain()
     gain.gain.value = 0.8
     source.connect(gain)
     gain.connect(this.master)
+    
     const now = this.ctx.currentTime
-    const duration = Math.max(0.05, Math.min(source.buffer?.duration ?? 0.5, 5))
-    let started = false
-    try {
-      source.start(now)
-      started = true
-      markSourceStarted(source)
-      source.stop(now + duration)
-      source._started = false
-    } catch (error) {
-      if (!started) {
+    source.start(now, start, duration)
+    
+    const cleanup = () => {
+        try { source.stop() } catch {}
         try { source.disconnect() } catch {}
         try { gain.disconnect() } catch {}
-        return
-      }
-      throw error
     }
-    const cleanup = () => {
-      try { source.disconnect() } catch {}
-      try { gain.disconnect() } catch {}
-    }
+    
     source.addEventListener('ended', cleanup, { once: true })
+    setTimeout(cleanup, duration * 1000 + 200)
   }
 
   private buildFxChain() {
@@ -1432,822 +1064,13 @@ export class SynthEngine {
     return sum as AudioNode
   }
 
-  // --- Macro engine helpers ---
-  private makeWavefolderCurve(amount: number, symmetry: number, size = 2048) {
-    const curve = new Float32Array(size)
-    const k = Math.max(0.0001, amount) * 6
-    const sym = (symmetry - 0.5) * 2
-    for (let i = 0; i < size; i++) {
-      let x = (i / (size - 1)) * 2 - 1
-      x += sym * 0.5
-      const y = Math.tanh(k * x) / Math.tanh(k)
-      curve[i] = y
-    }
-    return curve
-  }
-
-  private buildMacroVoice(freq: number, settings: MacroSettings) {
-    switch (settings.model) {
-      case 'fold':
-        return this.createMacroFold(freq, settings)
-      case 'pluck':
-        return this.createMacroPluck(freq, settings)
-      case 'supersaw':
-        return this.createMacroSuperSaw(freq, settings)
-      case 'pwm':
-        return this.createMacroPWM(freq, settings)
-      case 'fm2op':
-        return this.createMacroFM2Op(freq, settings)
-      case 'wavetable':
-        return this.createMacroWavetable(freq, settings)
-      case 'harmonic':
-        return this.createMacroHarmonic(freq, settings)
-      case 'chord':
-        return this.createMacroChord(freq, settings)
-      case 'dirichlet':
-        return this.createMacroDirichletPulse(freq, settings)
-      case 'formant':
-        return this.createMacroFormant(freq, settings)
-      case 'va':
-      default:
-        return this.createMacroVA(freq, settings)
-    }
-  }
-
-  private createMacroSuperSaw(freq: number, p: MacroSettings) {
-    const NUM = 6
-    const mix = this.ctx.createGain()
-    const tone = this.ctx.createBiquadFilter()
-    tone.type = 'lowpass'
-    tone.frequency.value = 800 + p.timbre * 12000
-    tone.Q.value = 0.3
-
-    // detune spread in cents (0..30)
-    const spreadCents = 0 + p.harmonics * 30
-    const pattern = [-1, -0.6, -0.2, 0.2, 0.6, 1]
-  const voices: { osc: OscillatorNode; pan: StereoPannerNode }[] = []
-    for (let i = 0; i < NUM; i++) {
-      const osc = this.ctx.createOscillator()
-      osc.type = 'sawtooth'
-      osc.frequency.value = freq
-      osc.detune.value = pattern[i] * spreadCents
-      const g = this.ctx.createGain()
-      g.gain.value = 1 / NUM
-      // Stereo spread: morph in [0..1] -> pan amount [-1..1] distributed across voices
-      const pan = this.ctx.createStereoPanner()
-      const spread = (p.morph - 0.5) * 2 // -1..1
-      const voicePan = (pattern[i] / Math.max(1, Math.max(...pattern.map(Math.abs)))) * spread
-      pan.pan.value = voicePan
-      osc.connect(g).connect(pan).connect(mix)
-      voices.push({ osc, pan })
-      osc.start()
-    }
-
-    mix.connect(tone)
-    const out = this.ctx.createGain()
-    out.gain.value = p.level
-    tone.connect(out)
-
-    return {
-      output: out as AudioNode,
-      stop: (t: number) => voices.forEach(({ osc }) => osc.stop(t)),
-      pitched: voices.map(v => v.osc),
-    }
-  }
-
-  private createMacroDirichletPulse(freq: number, p: MacroSettings) {
-    const osc = this.ctx.createOscillator()
-    osc.frequency.value = freq
-
-    const minPartials = 8
-    const maxPartials = 64
-    const partialCount = Math.max(minPartials, Math.round(minPartials + p.harmonics * (maxPartials - minPartials)))
-    const width = Math.min(0.92, Math.max(0.08, 0.08 + p.timbre * 0.84))
-    const phaseShift = (p.morph - 0.5) * Math.PI * 2
-
-    const real = new Float32Array(partialCount + 1)
-    const imag = new Float32Array(partialCount + 1)
-
-    real[0] = 0
-    for (let n = 1; n <= partialCount; n++) {
-      const harmonic = n
-      const baseAmp = (2 / (harmonic * Math.PI)) * Math.sin(harmonic * Math.PI * width)
-      const x = harmonic / (partialCount + 1)
-      const window = x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x)
-      const amp = baseAmp * window
-      if (!Number.isFinite(amp) || Math.abs(amp) < 1e-6) continue
-      const phase = phaseShift * harmonic
-      real[harmonic] = amp * Math.cos(phase)
-      imag[harmonic] = amp * Math.sin(phase)
-    }
-
-    const wave = this.ctx.createPeriodicWave(real, imag, { disableNormalization: false })
-    osc.setPeriodicWave(wave)
-
-    const tone = this.ctx.createBiquadFilter()
-    tone.type = 'lowpass'
-    const spectralReach = Math.max(freq * 2, freq * Math.min(partialCount + 2, 40))
-    tone.frequency.value = Math.min(this.ctx.sampleRate * 0.48, spectralReach)
-    tone.Q.value = Math.max(0.35, 0.7 + (0.5 - width) * 0.6)
-
-    const out = this.ctx.createGain()
-    out.gain.value = p.level
-
-    osc.connect(tone).connect(out)
-    osc.start()
-    return {
-      output: out as AudioNode,
-      stop: (t: number) => osc.stop(t),
-      pitched: [osc],
-    }
-  }
-
-  private createMacroWavetable(freq: number, p: MacroSettings) {
-    // Blend between basic waves: sine -> triangle -> saw -> square
-    const shapes: OscillatorType[] = ['sine', 'triangle', 'sawtooth', 'square']
-    const seg = Math.min(3, Math.max(0, Math.floor(p.morph * 3.00001)))
-    const t = Math.min(1, Math.max(0, p.morph * 3 - seg))
-
-    const make = (type: OscillatorType, gain: number) => {
-      const osc = this.ctx.createOscillator(); osc.type = type; osc.frequency.value = freq
-      const g = this.ctx.createGain(); g.gain.value = gain
-      osc.connect(g)
-      return { osc, g }
-    }
-    const a = make(shapes[seg], seg === 3 ? 1 : 1 - t)
-    const b = seg < 3 ? make(shapes[seg + 1], t) : null
-
-    // Brightness via lowpass; timbre adjusts Q a bit
-    const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass'
-    tone.frequency.value = 800 + p.harmonics * 15000
-    tone.Q.value = 0.1 + p.timbre * 0.6
-
-    const out = this.ctx.createGain(); out.gain.value = p.level
-    a.g.connect(tone); if (b) b.g.connect(tone); tone.connect(out)
-
-    a.osc.start(); if (b) b.osc.start()
-
-    const pitched: OscillatorNode[] = [a.osc]; if (b) pitched.push(b.osc)
-    return {
-      output: out as AudioNode,
-      stop: (tStop: number) => { a.osc.stop(tStop); if (b) b.osc.stop(tStop) },
-      pitched,
-    }
-  }
-
-  private createMacroHarmonic(freq: number, p: MacroSettings) {
-    // Additive stack with controllable partial count and tilt
-    const maxPartials = 16
-    const minPartials = 2
-    const count = Math.round(minPartials + p.harmonics * (maxPartials - minPartials))
-    const tilt = 0.5 + (1 - p.timbre) * 2.0 // higher -> darker
-    const oddEvenBias = (p.morph - 0.5) * 2 // -1..1 (odd..even)
-
-    const sum = this.ctx.createGain()
-    const pitched: OscillatorNode[] = []
-    for (let n = 1; n <= count; n++) {
-      const osc = this.ctx.createOscillator(); osc.type = 'sine'
-      osc.frequency.value = freq * n
-      let amp = 1 / Math.pow(n, tilt)
-      const isEven = (n % 2) === 0
-      const bias = isEven ? Math.max(0.1, (oddEvenBias + 1) / 2) : Math.max(0.1, (1 - oddEvenBias) / 2)
-      amp *= bias
-      const g = this.ctx.createGain(); g.gain.value = amp
-      osc.connect(g).connect(sum)
-      osc.start()
-      pitched.push(osc)
-    }
-    const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass'
-    tone.frequency.value = 1000 + p.timbre * 15000
-    tone.Q.value = 0.2
-    const out = this.ctx.createGain(); out.gain.value = p.level
-    sum.connect(tone).connect(out)
-    return {
-      output: out as AudioNode,
-      stop: (tStop: number) => { for (const o of pitched) o.stop(tStop) },
-      pitched,
-    }
-  }
-
-  private createMacroFormant(freq: number, p: MacroSettings) {
-    const source = this.ctx.createOscillator()
-    source.type = 'sawtooth'
-    source.frequency.value = freq
-
-    const pre = this.ctx.createGain()
-    pre.gain.value = 1
-    source.connect(pre)
-
-    const mix = this.ctx.createGain()
-    mix.gain.value = 1
-
-    const vowelSets = [
-      { ratios: [1.0, 2.6, 4.9], widths: [0.22, 0.18, 0.28], gains: [1.0, 0.7, 0.45] },
-      { ratios: [0.9, 2.1, 3.5], widths: [0.28, 0.22, 0.32], gains: [1.0, 0.65, 0.55] },
-      { ratios: [1.3, 2.8, 4.2], widths: [0.2, 0.16, 0.24], gains: [0.9, 0.75, 0.5] },
-      { ratios: [0.8, 1.6, 2.8], widths: [0.32, 0.26, 0.36], gains: [1.05, 0.6, 0.55] },
-    ] as const
-
-    const setPosition = p.morph * (vowelSets.length - 1)
-    const setIndex = Math.floor(setPosition)
-    const nextIndex = Math.min(vowelSets.length - 1, setIndex + 1)
-    const blend = setPosition - setIndex
-    const setA = vowelSets[setIndex] ?? vowelSets[0]
-    const setB = vowelSets[nextIndex]
-
-    const ratioScale = 0.8 + p.harmonics * 1.4
-    const resonanceBoost = 0.6 + p.timbre * 2.4
-    const safetyNyquist = this.ctx.sampleRate * 0.48
-    const formantCount = setA.ratios.length
-
-    for (let i = 0; i < formantCount; i++) {
-      const ratioA = setA.ratios[i]
-      const ratioB = setB.ratios[i]
-      const widthA = setA.widths[i]
-      const widthB = setB.widths[i]
-      const gainA = setA.gains[i]
-      const gainB = setB.gains[i]
-
-      const ratio = (ratioA + (ratioB - ratioA) * blend) * ratioScale
-      const width = Math.max(0.05, widthA + (widthB - widthA) * blend)
-      const gain = gainA + (gainB - gainA) * blend
-
-      const center = Math.min(safetyNyquist, Math.max(60, freq * ratio))
-      const filter = this.ctx.createBiquadFilter()
-      filter.type = 'bandpass'
-      filter.frequency.value = center
-      const q = Math.max(0.5, Math.min(30, (1 / width) * resonanceBoost))
-      filter.Q.value = q
-
-      const g = this.ctx.createGain()
-      g.gain.value = (gain / formantCount) * (1 / Math.sqrt(q))
-
-      pre.connect(filter)
-      filter.connect(g).connect(mix)
-    }
-
-    const highpass = this.ctx.createBiquadFilter()
-    highpass.type = 'highpass'
-    highpass.frequency.value = Math.max(40, freq * 0.5)
-    highpass.Q.value = 0.7
-
-    const body = this.ctx.createBiquadFilter()
-    body.type = 'lowpass'
-    body.frequency.value = Math.min(safetyNyquist, 3000 + p.harmonics * 14000)
-    body.Q.value = 0.7 + p.timbre * 0.6
-
-    mix.connect(highpass).connect(body)
-
-    const out = this.ctx.createGain()
-    out.gain.value = p.level
-    body.connect(out)
-
-    source.start()
-
-    return {
-      output: out as AudioNode,
-      stop: (t: number) => source.stop(t),
-      pitched: [source],
-    }
-  }
-
-  private createMacroChord(freq: number, p: MacroSettings) {
-    // Stack a chord; choose set by harmonics, inversion/spread by morph
-    const CHORDS: number[][] = [
-      [0, 4, 7],            // Major
-      [0, 3, 7],            // Minor
-      [0, 5, 7],            // Sus4
-      [0, 2, 7],            // Sus2
-      [0, 4, 7, 10],        // Dom7
-      [0, 3, 7, 10],        // Min7
-      [0, 4, 7, 11],        // Maj7
-      [0, 3, 6, 9],         // Dim7
-      [0, 4, 8],            // Aug
-      [-12, 0, 7, 12],      // Spread octave
-    ]
-    const idx = Math.max(0, Math.min(CHORDS.length - 1, Math.floor(p.harmonics * CHORDS.length)))
-    const chord = CHORDS[idx]
-    const spread = (p.morph - 0.5) * 2 // -1..1 -> detune/pan
-
-    const mix = this.ctx.createGain()
-    const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass'
-    tone.frequency.value = 900 + p.timbre * 15000
-    tone.Q.value = 0.3
-    const out = this.ctx.createGain(); out.gain.value = p.level
-
-    const pitched: OscillatorNode[] = []
-    const panPattern = [-1, -0.3, 0.3, 1]
-    chord.forEach((semi, i) => {
-      const osc = this.ctx.createOscillator(); osc.type = 'sawtooth'
-      const f = 440 * Math.pow(2, (Math.log2(freq / 440) + semi / 12))
-      osc.frequency.value = f
-      const detuneCents = panPattern[i % panPattern.length] * spread * 15
-      osc.detune.value = detuneCents
-      const g = this.ctx.createGain(); g.gain.value = 1 / chord.length
-      const pan = this.ctx.createStereoPanner(); pan.pan.value = panPattern[i % panPattern.length] * spread
-      osc.connect(g).connect(pan).connect(mix)
-      osc.start()
-      pitched.push(osc)
-    })
-
-    mix.connect(tone).connect(out)
-    return {
-      output: out as AudioNode,
-      stop: (tStop: number) => { for (const o of pitched) o.stop(tStop) },
-      pitched,
-    }
-  }
-
-  private createMacroPWM(freq: number, p: MacroSettings) {
-    // Generate PWM by offsetting a saw and passing through a steep tanh shaper
-    const saw = this.ctx.createOscillator()
-    saw.type = 'sawtooth'
-    saw.frequency.value = freq
-
-    // Summing node (Gain acts as adder in Web Audio)
-    const sum = this.ctx.createGain()
-    sum.gain.value = 1
-    const dc = this.ctx.createConstantSource()
-    // morph controls duty (roughly 10%..90%) -> shift -0.8..+0.8
-    const shift = (p.morph - 0.5) * 1.6
-    dc.offset.value = shift
-  dc.start()
-
-    saw.connect(sum)
-    dc.connect(sum)
-
-    const shaper = this.ctx.createWaveShaper()
-    // Edge sharpness from harmonics (higher -> steeper -> brighter)
-    const k = 1 + p.harmonics * 24
-    const size = 2048
-    const curve = new Float32Array(size)
-    for (let i = 0; i < size; i++) {
-      const x = (i / (size - 1)) * 2 - 1
-      curve[i] = Math.tanh(k * x)
-    }
-    shaper.curve = curve
-    shaper.oversample = '4x'
-
-    const tone = this.ctx.createBiquadFilter()
-    tone.type = 'lowpass'
-    // tame aliasing on sharp edges; timbre opens the filter
-    tone.frequency.value = 2000 + p.timbre * 14000
-    tone.Q.value = 0.2
-
-    const out = this.ctx.createGain()
-    out.gain.value = p.level
-
-    sum.connect(shaper).connect(tone).connect(out)
-    saw.start()
-    return {
-      output: out as AudioNode,
-      stop: (t: number) => { saw.stop(t); dc.stop(t) },
-      pitched: [saw],
-    }
-  }
-
-  private createMacroFM2Op(freq: number, p: MacroSettings) {
-    // Simple 2-operator FM: sine modulator -> carrier frequency
-    const carrier = this.ctx.createOscillator()
-    carrier.type = 'sine'
-    carrier.frequency.value = freq
-
-    const mod = this.ctx.createOscillator()
-    mod.type = 'sine'
-    // harmonics controls ratio (0.25 .. 8.0)
-    const ratio = 0.25 + p.harmonics * 7.75
-    mod.frequency.value = freq * ratio
-
-    // timbre controls index (amount in Hz). Scale with frequency for consistency
-    const amt = this.ctx.createGain()
-    amt.gain.value = Math.max(0, p.timbre) * freq * 2
-    mod.connect(amt).connect(carrier.frequency)
-
-    const tone = this.ctx.createBiquadFilter()
-    tone.type = 'lowpass'
-    // morph opens the filter
-    tone.frequency.value = 1000 + p.morph * 15000
-    tone.Q.value = 0.1
-
-    const out = this.ctx.createGain()
-    out.gain.value = p.level
-    carrier.connect(tone).connect(out)
-
-    carrier.start()
-    mod.start()
-    return {
-      output: out as AudioNode,
-      stop: (t: number) => { carrier.stop(t); mod.stop(t) },
-      pitched: [carrier],
-    }
-  }
-
-  private createMacroVA(freq: number, p: MacroSettings) {
-    const oscSaw = this.ctx.createOscillator()
-    const oscTri = this.ctx.createOscillator()
-    oscSaw.type = 'sawtooth'
-    oscTri.type = 'triangle'
-    oscSaw.frequency.value = freq
-    oscTri.frequency.value = freq
-
-    const triGain = this.ctx.createGain()
-    const sawGain = this.ctx.createGain()
-    triGain.gain.value = 1 - p.timbre
-    sawGain.gain.value = p.timbre
-    const mix = this.ctx.createGain()
-    const tone = this.ctx.createBiquadFilter()
-    tone.type = 'lowpass'
-    tone.frequency.value = 1000 + p.harmonics * 15000
-    tone.Q.value = 0.5
-
-    oscTri.connect(triGain).connect(mix)
-    oscSaw.connect(sawGain).connect(mix)
-    mix.connect(tone)
-
-    oscTri.start()
-    oscSaw.start()
-
-    return {
-      output: tone as AudioNode,
-      stop: (t: number) => { oscTri.stop(t); oscSaw.stop(t) },
-      pitched: [oscTri, oscSaw],
-    }
-  }
-
-  private createMacroFold(freq: number, p: MacroSettings) {
-    const osc = this.ctx.createOscillator()
-    osc.type = 'sine'
-    osc.frequency.value = freq
-    const pre = this.ctx.createGain()
-    const shaper = this.ctx.createWaveShaper()
-    const post = this.ctx.createGain()
-
-    const drive = 0.2 + p.harmonics * 1.6
-    const symmetry = p.morph
-    shaper.curve = this.makeWavefolderCurve(drive, symmetry)
-    shaper.oversample = '4x'
-
-    pre.gain.value = 1
-    post.gain.value = p.level
-    const tone = this.ctx.createBiquadFilter()
-    tone.type = 'lowpass'
-    tone.frequency.value = 4000 + p.timbre * 16000
-    tone.Q.value = 0.2
-
-    osc.connect(pre).connect(shaper).connect(tone).connect(post)
-    osc.start()
-    return {
-      output: post as AudioNode,
-      stop: (t: number) => osc.stop(t),
-      pitched: [osc],
-    }
-  }
-
-  private createMacroPluck(freq: number, p: MacroSettings) {
-    const out = this.ctx.createGain()
-    const burst = this.ctx.createBufferSource()
-    const len = Math.floor(this.ctx.sampleRate * 0.02)
-    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate)
-    const ch = buf.getChannelData(0)
-    for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / len)
-    burst.buffer = buf
-    burst.loop = false
-
-    const periodSec = 1 / Math.max(20, freq)
-    const delay = this.ctx.createDelay(1.0)
-    delay.delayTime.value = periodSec
-    const feedback = this.ctx.createGain()
-    const harmonicPush = 0.78 + p.harmonics * 0.2 // keep base resonance musical
-    const freqLoss = Math.max(0.8, 1 - freq * 0.0009) // higher pitches need more loss
-    feedback.gain.value = Math.min(0.96, harmonicPush * freqLoss)
-    const damp = this.ctx.createBiquadFilter()
-    damp.type = 'lowpass'
-    damp.frequency.value = 1000 + p.timbre * 8000
-    damp.Q.value = 0
-    const preHP = this.ctx.createBiquadFilter()
-    preHP.type = 'highpass'
-    preHP.frequency.value = 50 + p.morph * 400
-
-    burst.connect(preHP).connect(delay).connect(out)
-    delay.connect(damp).connect(feedback).connect(delay)
-    out.gain.value = p.level
-    burst.start()
-    return {
-      output: out as AudioNode,
-      stop: (_t: number) => { /* one-shot */ },
-      pitched: [],
-    }
-  }
-
-  private makeVoice(freq: number) {
-    const now = this.ctx.currentTime
-    const env = this.patch.envelope
-
-    const oscGain = this.ctx.createGain()
-    oscGain.gain.value = 0
-    oscGain.connect(this.filter)
-
-    // Scale peak amplitude inversely with active voice load (sqrt keeps dynamics present)
-    const activeVoiceCount = this.activeVoices.size
-    const VOICE_GAIN_BASE = 0.65
-    const voiceGainScale = VOICE_GAIN_BASE / Math.max(1, Math.sqrt(activeVoiceCount + 1))
-
-    const clampOctave = (value: number | undefined) => {
-      const n = Number(value ?? 0)
-      if (!Number.isFinite(n)) return 0
-      return Math.max(-3, Math.min(3, Math.round(n)))
-    }
-    const osc1Octave = clampOctave(this.patch.osc1.octave)
-    const osc1Freq = freq * Math.pow(2, osc1Octave)
-
-    const engineMode = this.patch.engineMode ?? 'classic'
-    const fallbackMode = (mode: EngineMode) => (mode === 'macro' ? 'macro' : mode === 'sampler' ? 'sampler' : 'analog')
-    const osc1Mode = this.patch.osc1.mode ?? fallbackMode(engineMode)
-    const osc2Mode = this.patch.osc2.mode ?? fallbackMode(engineMode)
-
-    // Sub-mix for two oscillators
-    const sub1 = this.ctx.createGain()
-    const sub2 = this.ctx.createGain()
-    sub1.gain.value = 0
-    sub2.gain.value = 0
-    // Normal sum (so we can crossfade with ring product if enabled)
-    const normalSum = this.ctx.createGain()
-    normalSum.gain.value = 1
-    sub1.connect(normalSum)
-    sub2.connect(normalSum)
-    normalSum.connect(oscGain)
-
-    const mixBase = clampValue(this.patch.mix, 0, 1)
-    const mixControl = this.ctx.createConstantSource()
-    mixControl.offset.value = mixBase
-    const mixBias = this.ctx.createConstantSource()
-    mixBias.offset.value = 1
-    const mixInvert = this.ctx.createGain()
-    mixInvert.gain.value = -1
-    mixControl.connect(sub2.gain)
-    mixControl.connect(mixInvert)
-    mixInvert.connect(sub1.gain)
-    mixBias.connect(sub1.gain)
-    mixControl.start()
-    mixBias.start()
-
-    const sources: AudioScheduledSourceNode[] = []
-    let osc1Node: OscillatorNode | null = null
-    let osc2Node: OscillatorNode | null = null
-    let primarySource: AudioNode | null = null
-    const lfoParamConnections: Array<{ g: GainNode; p: AudioParam }> = []
-    const macroVoices: Array<{ output: AudioNode; stop: (t: number) => void; pitched?: OscillatorNode[] }> = []
-
-    // Oscillator 1 (carrier)
-    {
-      if (osc1Mode === 'macro') {
-        const macroSettings = this.patch.osc1.macro ?? this.patch.macro ?? DEFAULT_OSCILLATOR_MACRO
-        const macro = this.buildMacroVoice(osc1Freq, macroSettings)
-        macro.output.connect(sub1)
-        macroVoices.push(macro)
-        if (!primarySource) primarySource = macro.output
-        if (macro.pitched && macro.pitched.length) {
-          for (const osc of macro.pitched) {
-            for (const l of this.lfos) {
-              if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-                l.gain.connect(osc.detune)
-                lfoParamConnections.push({ g: l.gain, p: osc.detune })
-              }
-            }
-          }
-        }
-      } else if (osc1Mode === 'sampler') {
-        const sample = this.createSamplerSource(osc1Freq, 'osc1')
-        if (sample) {
-          sample.connect(sub1)
-          sources.push(sample)
-          primarySource = sample
-        }
-      } else {
-        let s1: OscillatorNode | AudioBufferSourceNode | null = null
-        if (this.patch.osc1.wave === 'noise') {
-          const src = ensureManagedSource(this.ctx.createBufferSource())
-          src.buffer = this.noiseBuffer!
-          src.loop = true
-          s1 = src
-        } else if (this.patch.osc1.wave === 'sample') {
-          s1 = this.createSamplerSource(osc1Freq, 'osc1')
-        } else {
-          const osc = ensureManagedSource(this.ctx.createOscillator())
-          osc.type = this.patch.osc1.wave as OscillatorType
-          osc.frequency.setValueAtTime(osc1Freq, now)
-          const fine = this.patch.osc1.detuneFine ?? 0
-          osc.detune.value = (this.patch.osc1.detune || 0) + fine
-          s1 = osc
-          osc1Node = osc
-        }
-
-        if (s1) {
-          s1.connect(sub1)
-          sources.push(s1)
-          primarySource = s1
-        }
-
-        if (s1 && this.patch.fm.enabled && 'frequency' in (s1 as any)) {
-          const carrier = s1 as OscillatorNode
-          const mod = ensureManagedSource(this.ctx.createOscillator())
-          mod.type = this.patch.osc2.wave as OscillatorType
-          const ratio = Math.max(0.01, this.patch.fm.ratio || 1)
-          mod.frequency.setValueAtTime(freq * ratio, now)
-          mod.detune.value = this.patch.osc2.detune || 0
-          const modGain = this.ctx.createGain()
-          modGain.gain.value = Math.max(0, this.patch.fm.amount || 0)
-          mod.connect(modGain)
-          modGain.connect(carrier.frequency)
-          sources.push(mod)
-        }
-
-        if (s1 && 'detune' in (s1 as any)) {
-          for (const l of this.lfos) {
-            if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-              l.gain.connect((s1 as OscillatorNode).detune)
-              lfoParamConnections.push({ g: l.gain, p: (s1 as OscillatorNode).detune })
-            }
-          }
-        }
-      }
-    }
-
-    // Oscillator 2
-    {
-      if (osc2Mode === 'macro') {
-        const macroSettings = this.patch.osc2.macro ?? this.patch.macro ?? DEFAULT_OSCILLATOR_MACRO
-        const macro = this.buildMacroVoice(freq, macroSettings)
-        macro.output.connect(sub2)
-        macroVoices.push(macro)
-        if (macro.pitched && macro.pitched.length) {
-          for (const osc of macro.pitched) {
-            for (const l of this.lfos) {
-              if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-                l.gain.connect(osc.detune)
-                lfoParamConnections.push({ g: l.gain, p: osc.detune })
-              }
-            }
-          }
-        }
-      } else if (osc2Mode === 'sampler') {
-        const sample = this.createSamplerSource(freq, 'osc2')
-        if (sample) {
-          sample.connect(sub2)
-          sources.push(sample)
-        }
-      } else {
-        let s2: OscillatorNode | AudioBufferSourceNode | null = null
-        if (this.patch.osc2.wave === 'noise') {
-          const src = ensureManagedSource(this.ctx.createBufferSource())
-          src.buffer = this.noiseBuffer!
-          src.loop = true
-          s2 = src
-        } else {
-          const osc = ensureManagedSource(this.ctx.createOscillator())
-          osc.type = this.patch.osc2.wave as OscillatorType
-          osc.frequency.setValueAtTime(freq, now)
-          osc.detune.value = this.patch.osc2.detune
-          s2 = osc
-          osc2Node = osc
-        }
-
-        if (s2) {
-          s2.connect(sub2)
-          sources.push(s2)
-        }
-
-        // Ring modulation: multiply s1 by s2 and crossfade with normal mix
-        if (this.patch.ring.enabled && primarySource && s2) {
-          const ringVca = this.ctx.createGain()
-          ringVca.gain.value = 0 // remove DC offset so gain comes purely from modulator
-          primarySource.connect(ringVca)
-          // depth: modulator -> gain (audio-rate modulation)
-          const depth = this.ctx.createGain()
-          depth.gain.value = 1
-          s2.connect(depth)
-          depth.connect(ringVca.gain)
-
-          // Crossfade between normal sum and ring product
-          const amt = Math.max(0, Math.min(1, this.patch.ring.amount))
-          normalSum.gain.value = 1 - amt
-          const ringGain = this.ctx.createGain()
-          ringGain.gain.value = amt
-          ringVca.connect(ringGain)
-          ringGain.connect(oscGain)
-        }
-
-        // LFOs to pitch (detune) for osc2 if applicable
-        if (s2 && 'detune' in (s2 as any)) {
-          for (const l of this.lfos) {
-            if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-              l.gain.connect((s2 as OscillatorNode).detune)
-              lfoParamConnections.push({ g: l.gain, p: (s2 as OscillatorNode).detune })
-            }
-          }
-        }
-      }
-    }
-
-    // ADSR envelope
-    const g = oscGain.gain
-    g.cancelScheduledValues(now)
-    g.setValueAtTime(0, now)
-    g.linearRampToValueAtTime(voiceGainScale, now + Math.max(0.001, env.attack))
-    g.linearRampToValueAtTime(env.sustain * voiceGainScale, now + env.attack + Math.max(0.001, env.decay))
-
-    // Sub oscillator: mixed into the same ADSR path
-    if (this.patch.sub.enabled) {
-      const subOsc = ensureManagedSource(this.ctx.createOscillator())
-      subOsc.type = (this.patch.sub.wave || 'square') as OscillatorType
-      const subFreq = freq / Math.pow(2, Math.max(1, Math.min(2, this.patch.sub.octave)))
-      subOsc.frequency.setValueAtTime(subFreq, now)
-      const subGain = this.ctx.createGain()
-      subGain.gain.value = Math.max(0, Math.min(1, this.patch.sub.level))
-      subOsc.connect(subGain)
-      subGain.connect(oscGain)
-      sources.push(subOsc)
-      // Vibrato on sub
-      for (const l of this.lfos) {
-        if (l.dest === 'pitch' && this.patch[(this.lfos.indexOf(l) === 0 ? 'lfo1' : 'lfo2') as 'lfo1' | 'lfo2']?.enabled) {
-          l.gain.connect(subOsc.detune)
-          lfoParamConnections.push({ g: l.gain, p: subOsc.detune })
-        }
-      }
-    }
-
-    for (const s of sources) {
-      if ('start' in s) {
-        const node = ensureManagedSource(s)
-        if (node._autoStarted) continue
-        if (!node._started) {
-          node.start()
-          markSourceStarted(node)
-        }
-      }
-    }
-
-    const mixConnections: Array<{ sourceIndex: number; gain: GainNode }> = []
-
-    const stop = (releaseTime: number) => {
-      const t = Math.max(this.ctx.currentTime, releaseTime)
-      g.cancelScheduledValues(t)
-      g.setValueAtTime(g.value, t)
-      g.linearRampToValueAtTime(0, t + Math.max(0.001, env.release))
-      for (const s of sources) {
-        if ('stop' in s) {
-          const node = ensureManagedSource(s)
-          if (!node._started) continue
-          try {
-            node.stop(t + env.release + 0.05)
-          } catch (error) {
-            if (!(error instanceof DOMException)) {
-              throw error
-            }
-          } finally {
-            node._started = false
-          }
-        }
-      }
-      for (const macro of macroVoices) {
-        try { macro.stop(t + env.release + 0.05) } catch {}
-      }
-      // Disconnect LFO param connections for this voice
-      for (const c of lfoParamConnections) {
-        try { c.g.disconnect(c.p) } catch {}
-      }
-      for (const conn of mixConnections) {
-        const sourceNode = this.lfos[conn.sourceIndex]?.gain
-        if (sourceNode) {
-          try { sourceNode.disconnect(conn.gain) } catch {}
-        }
-        try { conn.gain.disconnect() } catch {}
-      }
-      try { mixControl.stop(t + env.release + 0.05) } catch {}
-      try { mixBias.stop(t + env.release + 0.05) } catch {}
-      try { mixControl.disconnect() } catch {}
-      try { mixInvert.disconnect() } catch {}
-      try { mixBias.disconnect() } catch {}
-    }
-
-    // Expose detune params for live updates (only if oscillators, not noise)
-    const voiceHandle: ActiveVoice = {
-      stop,
-      mixControl,
-      mixBias,
-      mixConnections,
-    }
-    if (osc1Node) voiceHandle.osc1Detune = osc1Node.detune
-    if (osc2Node) voiceHandle.osc2Detune = osc2Node.detune
-
-    return voiceHandle
-  }
-
-  
-
   allNotesOff() {
     const t = this.ctx.currentTime
-    for (const v of this.activeVoices.values()) v.stop(t)
+    for (const v of this.activeVoices.values()) {
+        try {
+            v.stop(t, 0.1)
+        } catch {}
+    }
     this.activeVoices.clear()
     this.activeNoteVelocities.clear()
     this.refreshVelocitySignals()
@@ -2708,9 +1531,50 @@ export class SynthEngine {
       this.updateArpScheduler()
       return
     }
+
+    // Stop existing voice if any
+    const existing = this.activeVoices.get(midi)
+    if (existing) {
+      try { existing.stop(this.ctx.currentTime, 0.05) } catch {}
+      this.activeVoices.delete(midi)
+    }
+
     const freq = 440 * Math.pow(2, (midi - 69) / 12)
-    const voice = this.makeVoice(freq)
+    
+    // Create SamplerContext
+    const samplerContext: SamplerContext = {
+      buffer: this.samplerBuffer,
+      meta: { 
+          id: this.samplerMeta.id || null, 
+          dataUrl: this.samplerMeta.dataUrl || null,
+          trimStartSec: this.samplerMeta.trimStartSec,
+          trimEndSec: this.samplerMeta.trimEndSec,
+          rootMidi: this.samplerMeta.rootMidi ?? 60, 
+          loop: !!this.samplerMeta.loop 
+      },
+      pitchCache: this.samplerPitchCache
+    }
+
+    // Build LFO gains structure
+    const lfos = {
+      lfo1: { gain: this.lfos[0].gain, enabled: !!this.patch.lfo1?.enabled, dest: this.lfos[0].dest },
+      lfo2: { gain: this.lfos[1].gain, enabled: !!this.patch.lfo2?.enabled, dest: this.lfos[1].dest },
+    }
+
+    const voice = new Voice(
+      this.ctx,
+      this.filter, // Connected to filter
+      freq,
+      this.patch,
+      this.noiseBuffer,
+      samplerContext,
+      this.activeVoices.size,
+      lfos
+    )
+
     this.activeVoices.set(midi, voice)
+    
+    // Register velocity
     const velNorm = clampValue(velocity, 0, 1)
     this.activeNoteVelocities.set(midi, velNorm)
     this.refreshVelocitySignals()
@@ -2727,7 +1591,9 @@ export class SynthEngine {
       // If the released key is the currently sounding one, stop it now
       if (this.arpLastNote === midi) {
         const v = this.activeVoices.get(midi)
-        if (v) v.stop(this.ctx.currentTime)
+        if (v) {
+            try { v.stop(this.ctx.currentTime, this.patch.envelope.release) } catch {}
+        }
         this.activeVoices.delete(midi)
         if (this.arpLastNote === midi) this.arpLastNote = null
       }
@@ -2735,13 +1601,13 @@ export class SynthEngine {
     }
     const v = this.activeVoices.get(midi)
     if (v) {
-      v.stop(this.ctx.currentTime)
+      try { v.stop(this.ctx.currentTime, this.patch.envelope.release) } catch {}
       this.activeVoices.delete(midi)
     }
     if (!this.arpBypass) {
       this.activeNoteVelocities.delete(midi)
     } else {
-      this.activeNoteVelocities.delete(midi)
+      this.activeNoteVelocities.delete(midi) // Same? 
     }
     this.refreshVelocitySignals()
   }
