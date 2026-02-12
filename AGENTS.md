@@ -1,42 +1,35 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
-- `src/audio-engine/`: Web Audio/DSP logic (pure TS where possible).
-- `src/ui/`: React components and controls (`*.tsx`).
-- `src/state/`: Zustand store and selectors.
-- `src/patches/`: Preset definitions and helpers.
-- `public/` and `index.html`: Static assets and HTML shell.
-- `docs/`: Project docs and static assets for documentation.
+This file provides guidance to agents when working with code in this repository.
 
-## Build, Test, and Development Commands
-- `npm run dev`: Start Vite dev server with HMR.
-- `npm run build`: Type-check (`tsc -b`) then create production build.
-- `npm run preview`: Serve the built app locally for QA.
-- `npm test`: Run Vitest in CI mode.
-- `npm run test:watch`: Run Vitest in watch mode.
-- `npm run typecheck`: TypeScript no‑emit type checking.
-- `npm run lint` / `npm run format`: ESLint/Prettier for linting and formatting.
+## Build Output
+- Production builds output to `docs/` directory (not `dist`) for GitHub Pages deployment
+- Base URL is `./` (relative) for GitHub Pages subpath support
 
-## Coding Style & Naming Conventions
-- TypeScript everywhere; avoid `any` (rule enabled). Prefer explicit types.
-- Formatting via Prettier; 2‑space indentation, single quotes, semicolons by default.
-- React: function components with hooks; component/file names in `PascalCase.tsx`.
-- Functions/variables in `camelCase`; constants in `SCREAMING_SNAKE_CASE`.
-- Keep audio logic framework‑agnostic under `src/audio-engine`; UI logic in `src/ui`.
+## TypeScript Path Aliases
+Configured in tsconfig.json - use these for cross-module imports:
+- `@audio/*` → `src/audio-engine/*`
+- `@state/*` → `src/state/*`
+- `@ui/*` → `src/ui/*`
+- `@patches/*` → `src/patches/*`
 
-## Testing Guidelines
-- Frameworks: Vitest + React Testing Library (`jsdom`).
-- Location/pattern: colocate tests next to code as `*.test.ts[x]` (e.g., `src/audio-engine/engine.test.ts`).
-- Scope: prioritize DSP math/routing and critical UI interactions. Mock or guard Web Audio in `jsdom`.
-- Run locally: `npm test` (CI) or `npm run test:watch` (dev). Add regression tests with bug fixes.
+## Web Audio Critical Rules
+- **Never** access AudioContext at module import time - initialize lazily on user gesture
+- Use `setTargetAtTime` or `exponentialRampToValueAtTime` for parameter changes (never set `.value` directly) to prevent clicks/pops
+- Mock Web Audio API objects in tests (jsdom doesn't provide them)
 
-## Commit & Pull Request Guidelines
-- Commits: Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`). Keep changes focused and atomic.
-- Before pushing: `npm run lint && npm run typecheck && npm test && npm run build` should pass.
-- PRs: clear description, linked issue, screenshots/GIFs for UI changes, and notes on testing/edge cases. Update README/docs and presets when relevant.
+## Patch Normalization
+When loading presets, always normalize with:
+- `normalizeOscillator()` - handles missing mode/macro/sampler fields
+- `normalizeModMatrix()` - validates mod sources/targets, generates IDs
+- `normalizeSequencer()` - clamps length, rootMidi, validates steps
 
-## Security & Configuration Tips
-- Do not access `AudioContext` at module import; initialize on explicit user gesture.
-- No secrets or runtime env vars expected; keep repo public‑safe. Place new presets in `src/patches/`.
-- Prefer native Web Audio nodes; avoid adding heavy deps without discussion.
+## Testing
+- Vitest configured with `globals: true` - no need to import describe/it/expect
+- Tests colocated with source: `*.test.ts[x]` pattern
+- Run single test file: `npx vitest run path/to/test.test.ts`
 
+## Pre-push Checklist
+```sh
+npm run lint && npm run typecheck && npm test && npm run build
+```

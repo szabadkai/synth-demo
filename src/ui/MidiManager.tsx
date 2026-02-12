@@ -124,7 +124,9 @@ export function MidiManager() {
       ? Array.from(access.inputs.values()).find((input) => input.id === selectedId)
       : null
 
-    if (inputRef.current && inputRef.current !== nextInput) {
+    // Always clear and re-attach when running this effect
+    // This handles device reconnection where the input object reference changes
+    if (inputRef.current) {
       inputRef.current.onmidimessage = null
       inputRef.current = null
       const notes = Array.from(activeNotesRef.current)
@@ -173,7 +175,7 @@ export function MidiManager() {
       activeNotesRef.current.clear()
       setMidiActiveNotes([])
     }
-  }, [engine, midi.enabled, midi.selectedInputId, setMidiActiveNotes])
+  }, [engine, midi.enabled, midi.selectedInputId, midi.inputs, setMidiActiveNotes])
 
   return null
 }
