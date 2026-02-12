@@ -1,3 +1,11 @@
+// MIDI CC numbers for expression control
+const CC_EXPRESSION = 11 // Expression pedal
+const CC_MODWHEEL = 1 // Modulation wheel
+const CC_BREATH = 2 // Breath controller
+const CC_FOOT = 4 // Foot controller
+const CC_DATA_MSB = 6 // Data entry MSB
+const CC_VOLUME = 7 // Main volume (often mapped to expression)
+
 import {
   ADSR,
   defaultPatch,
@@ -54,6 +62,7 @@ export type {
   OscillatorConfig,
   EngineMode,
   OscillatorMode,
+  ExpressionTarget,
 } from './types'
 
 // Re-export values used by UI
@@ -320,6 +329,28 @@ export class SynthEngine {
     return source === 'lfo2'
       ? (this.patch.lfo2 ?? defaultPatch.lfo2!)
       : (this.patch.lfo1 ?? defaultPatch.lfo1!)
+  }
+
+  // MIDI CC to expression mapping
+  private midiCcToExpression: Map<number, ExpressionTarget> = new Map([
+    [CC_EXPRESSION, 'master.gain'],
+    [CC_MODWHEEL, 'macro.timbre'],
+    [CC_BREATH, 'filter.cutoff'],
+    [CC_FOOT, 'envelope.attack'],
+    [CC_DATA_MSB, 'macro.harmonics'],
+    [CC_VOLUME, 'master.gain'],
+  ])
+
+  // Handle MIDI CC messages for expression control
+  handleMidiCc(ccNumber: number, value: number): void {
+    const target = this.midiCcToExpression.get(ccNumber)
+    if (!target) return
+    
+    // Normalize value to 0-1 range
+    const normalizedValue = Math.max(0, Math.min(1, value))
+    
+    // Apply the expression change
+    this.applyPatch({ [target]: normalizedValue }, { fromExpression: true })
   }
 
   private removeModConnection(id: string) {

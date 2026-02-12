@@ -1,8 +1,17 @@
 import React, { useEffect, useRef } from 'react'
 import { useStore, type MidiDeviceInfo } from '../state/store'
+import type { ExpressionTarget } from '../audio-engine/engine'
 
 const NOTE_ON = 0x90
 const NOTE_OFF = 0x80
+
+// MIDI CC numbers for expression control
+const CC_EXPRESSION = 11 // Expression pedal
+const CC_MODWHEEL = 1 // Modulation wheel
+const CC_BREATH = 2 // Breath controller
+const CC_FOOT = 4 // Foot controller
+const CC_DATA_MSB = 6 // Data entry MSB
+const CC_VOLUME = 7 // Main volume (often mapped to expression)
 
 function mapDevices(access: MIDIAccess): MidiDeviceInfo[] {
   return Array.from(access.inputs.values()).map((input) => ({
@@ -149,6 +158,19 @@ export function MidiManager() {
       const data2 = data[2] ?? 0
       const command = status & 0xf0
       const midiNote = data1
+      
+      // Handle MIDI CC messages for expression control
+      if (command === 0xb0) { // Control Change
+        const ccNumber = data1
+        const ccValue = data2 / 127 // Normalize to 0-1 range
+        
+        // Use engine's handleMidiCc method
+        if (engine) {
+          engine.handleMidiCc(ccNumber, ccValue)
+        }
+        return
+      }
+      
       if (command === NOTE_ON && data2 > 0) {
         const velocity = Math.max(0, Math.min(1, data2 / 127))
         if (engine) engine.noteOn(midiNote, velocity)
